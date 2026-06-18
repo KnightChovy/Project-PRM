@@ -17,6 +17,12 @@ import 'package:smart_stay_ai/features/onboarding/presentation/pages/loading_scr
 import 'package:smart_stay_ai/features/rooms/domain/entities/room.dart';
 import 'package:smart_stay_ai/features/rooms/presentation/pages/room_detail_page.dart';
 import 'package:smart_stay_ai/features/rooms/presentation/pages/room_list_page.dart';
+// ---- Thêm bởi BinhKhiem (feat: myBooking/detail/cancel/review/AI) ----
+import 'package:smart_stay_ai/features/assistant/presentation/pages/assistant_page.dart';
+import 'package:smart_stay_ai/features/booking/presentation/pages/booking_detail_view_page.dart';
+import 'package:smart_stay_ai/features/booking/presentation/pages/cancel_booking_page.dart';
+import 'package:smart_stay_ai/features/booking/presentation/pages/my_bookings_view_page.dart';
+import 'package:smart_stay_ai/features/review/presentation/pages/write_review_page.dart';
 
 /// Tên (đường dẫn) các route — khai báo 1 chỗ để tránh gõ chuỗi lung tung.
 class AppRoutes {
@@ -35,6 +41,12 @@ class AppRoutes {
   static const guestDetails = '/guest-details';
   static const payment = '/payment';
   static const bookingConfirmed = '/booking-confirmed';
+  // ---- Thêm bởi BinhKhiem ----
+  static const myBookingsView = '/my-bookings';
+  static const bookingDetailView = '/booking-detail-view';
+  static const cancelBooking = '/cancel-booking';
+  static const writeReview = '/write-review';
+  static const assistant = '/assistant';
 }
 
 /// Cấu hình điều hướng tập trung. Đây là NƠI DUY NHẤT biết tất cả các page,
@@ -110,6 +122,30 @@ final GoRouter appRouter = GoRouter(
       path: AppRoutes.bookingConfirmed,
       pageBuilder: (_, state) =>
           _fade(state, BookingConfirmedPage(booking: state.extra as Booking)),
+    ),
+    // ---- Thêm bởi BinhKhiem (myBooking/detail/cancel/review/AI) ----
+    GoRoute(
+      path: AppRoutes.myBookingsView,
+      pageBuilder: (_, state) => _slide(state, const MyBookingsViewPage()),
+    ),
+    GoRoute(
+      path: AppRoutes.bookingDetailView,
+      pageBuilder: (_, state) =>
+          _slide(state, BookingDetailViewPage(booking: state.extra as Booking)),
+    ),
+    GoRoute(
+      path: AppRoutes.cancelBooking,
+      pageBuilder: (_, state) =>
+          _slide(state, CancelBookingPage(booking: state.extra as Booking)),
+    ),
+    GoRoute(
+      path: AppRoutes.writeReview,
+      pageBuilder: (_, state) => _slide(
+          state, WriteReviewPage(args: state.extra as WriteReviewArgs)),
+    ),
+    GoRoute(
+      path: AppRoutes.assistant,
+      pageBuilder: (_, state) => _slide(state, const AssistantPage()),
     ),
   ],
 );

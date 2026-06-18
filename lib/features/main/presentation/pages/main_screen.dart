@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:smart_stay_ai/core/theme/app_theme.dart';
-import 'package:smart_stay_ai/features/booking/presentation/pages/my_booking_page.dart';
+// Đổi bởi BinhKhiem: tab Bookings dùng bản nâng cấp (3 tab + Cancel/Review).
+// Bản cũ my_booking_page.dart của Phat vẫn được giữ nguyên trong repo.
+import 'package:smart_stay_ai/features/booking/presentation/pages/my_bookings_view_page.dart';
+// Đổi bởi BinhKhiem: tab Chatbot dùng màn AI Assistant.
+import 'package:smart_stay_ai/features/assistant/presentation/pages/assistant_page.dart';
 import 'package:smart_stay_ai/features/main/presentation/widgets/main_bottom_nav.dart';
 import 'package:smart_stay_ai/features/wishlist/presentation/pages/wishlist_page.dart';
 
@@ -23,8 +27,8 @@ class _MainScreenState extends State<MainScreen> {
   static const _pages = <Widget>[
     _PlaceholderPage(icon: Icons.home_rounded, title: 'Home'),
     WishlistPage(),
-    MyBookingPage(),
-    _PlaceholderPage(icon: Icons.chat_bubble_outline, title: 'Chatbot'),
+    MyBookingsViewPage(),
+    AssistantPage(),
     _PlaceholderPage(icon: Icons.person_outline, title: 'Profile'),
   ];
 
