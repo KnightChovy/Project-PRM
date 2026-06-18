@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../theme/app_theme.dart';
+import 'package:smart_stay_ai/core/theme/app_theme.dart';
 import 'introduction_screen.dart';
 
 /// Màn hình khởi động (splash) hiển thị khi mở app.

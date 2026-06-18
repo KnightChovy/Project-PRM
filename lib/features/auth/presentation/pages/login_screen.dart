@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
-import '../theme/app_theme.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:smart_stay_ai/core/di/injection.dart';
+import 'package:smart_stay_ai/core/theme/app_theme.dart';
+import 'package:smart_stay_ai/features/auth/presentation/bloc/auth_bloc.dart';
 import 'register_screen.dart';
 
 /// Màn hình đăng nhập.
@@ -24,13 +27,32 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
+    // Cấp AuthBloc cho cây widget này (lấy từ DI - service locator).
+    return BlocProvider(
+      create: (_) => sl<AuthBloc>(),
+      child: Scaffold(
+        body: SafeArea(
+          // BlocConsumer = vừa "nghe" trạng thái (báo lỗi / thành công),
+          // vừa vẽ lại UI theo trạng thái hiện tại.
+          child: BlocConsumer<AuthBloc, AuthState>(
+            listener: (context, state) {
+              if (state is AuthSuccess) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Xin chào ${state.user.name}!')),
+                );
+              } else if (state is AuthError) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text(state.message)),
+                );
+              }
+            },
+            builder: (context, state) {
+              final loading = state is AuthLoading;
+              return SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
               const SizedBox(height: 48),
               // Logo / ảnh thương hiệu
               Center(
@@ -102,7 +124,15 @@ class _LoginScreenState extends State<LoginScreen> {
               SizedBox(
                 height: 60,
                 child: ElevatedButton(
-                  onPressed: () {},
+                  // Bấm LOGIN -> gửi sự kiện vào Bloc; khi đang loading thì khóa nút.
+                  onPressed: loading
+                      ? null
+                      : () => context.read<AuthBloc>().add(
+                            AuthLoginRequested(
+                              email: _emailCtrl.text.trim(),
+                              password: _passCtrl.text,
+                            ),
+                          ),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.surface,
                     foregroundColor: AppColors.textPrimary,
@@ -112,14 +142,20 @@ class _LoginScreenState extends State<LoginScreen> {
                       borderRadius: BorderRadius.circular(30),
                     ),
                   ),
-                  child: const Text(
-                    'LOGIN',
-                    style: TextStyle(
-                      fontSize: 16,
-                      letterSpacing: 2,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
+                  child: loading
+                      ? const SizedBox(
+                          height: 22,
+                          width: 22,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text(
+                          'LOGIN',
+                          style: TextStyle(
+                            fontSize: 16,
+                            letterSpacing: 2,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
                 ),
               ),
               const SizedBox(height: 32),
@@ -191,8 +227,11 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ],
               ),
-              const SizedBox(height: 24),
-            ],
+                    const SizedBox(height: 24),
+                  ],
+                ),
+              );
+            },
           ),
         ),
       ),

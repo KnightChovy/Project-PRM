@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
-import 'theme/app_theme.dart';
-import 'screens/loading_screen.dart';
+import 'package:smart_stay_ai/core/di/injection.dart';
+import 'package:smart_stay_ai/core/theme/app_theme.dart';
+import 'package:smart_stay_ai/features/onboarding/presentation/pages/loading_screen.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await initDependencies(); // Khởi tạo DI trước khi chạy app.
   runApp(const SmartStayApp());
 }
 

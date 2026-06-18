@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../theme/app_theme.dart';
+import 'package:smart_stay_ai/core/theme/app_theme.dart';
 import 'info_screen.dart';
 
 /// Màn hình tạo tài khoản (bước 1 / 2).

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import '../theme/app_theme.dart';
-import 'login_screen.dart';
+import 'package:smart_stay_ai/core/theme/app_theme.dart';
+import 'package:smart_stay_ai/features/auth/presentation/pages/login_screen.dart';
 
 /// Dữ liệu cho từng trang giới thiệu.
 class _IntroPage {

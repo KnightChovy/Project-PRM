@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../theme/app_theme.dart';
+import 'package:smart_stay_ai/core/theme/app_theme.dart';
 
 /// Mô tả 1 tiện ích must-have (có icon + nhãn).
 class _Amenity {

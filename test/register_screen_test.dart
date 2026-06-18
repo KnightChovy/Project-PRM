@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-
-import 'package:smart_stay_ai/screens/register_screen.dart';
-import 'package:smart_stay_ai/screens/info_screen.dart';
+import 'package:smart_stay_ai/features/auth/presentation/pages/info_screen.dart';
+import 'package:smart_stay_ai/features/auth/presentation/pages/register_screen.dart';
 
 void main() {
   Future<void> pumpRegister(WidgetTester tester) async {
@@ -34,8 +33,9 @@ void main() {
       expect(find.byType(RegisterScreen), findsOneWidget);
     });
 
-    testWidgets('tick điều khoản rồi tạo tài khoản -> sang màn Info',
-        (tester) async {
+    testWidgets('tick điều khoản rồi tạo tài khoản -> sang màn Info', (
+      tester,
+    ) async {
       await pumpRegister(tester);
 
       await tester.tap(find.byType(Checkbox));
