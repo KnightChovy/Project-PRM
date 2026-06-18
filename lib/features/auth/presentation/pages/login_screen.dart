@@ -15,8 +15,9 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final _emailCtrl = TextEditingController();
-  final _passCtrl = TextEditingController();
+  // Điền sẵn tài khoản demo để đăng nhập nhanh (xem AuthMockRemoteDataSource).
+  final _emailCtrl = TextEditingController(text: 'demo@smartstay.com');
+  final _passCtrl = TextEditingController(text: '123456');
   bool _obscure = true;
 
   @override

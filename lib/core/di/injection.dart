@@ -1,5 +1,6 @@
 import 'package:get_it/get_it.dart';
 import 'package:smart_stay_ai/core/network/dio_client.dart';
+import 'package:smart_stay_ai/features/auth/data/datasources/auth_mock_remote_data_source.dart';
 import 'package:smart_stay_ai/features/auth/data/datasources/auth_remote_data_source.dart';
 import 'package:smart_stay_ai/features/auth/data/repositories/auth_repository_impl.dart';
 import 'package:smart_stay_ai/features/auth/domain/repositories/auth_repository.dart';
@@ -22,10 +23,14 @@ Future<void> initDependencies() async {
   sl.registerLazySingleton(() => DioClient());
 
   // ---- Feature: auth ----
-  // DataSource
+  // DataSource — đang dùng MOCK (chưa có backend).
+  // Khi có API thật: đổi sang AuthRemoteDataSourceImpl(sl()).
   sl.registerLazySingleton<AuthRemoteDataSource>(
-    () => AuthRemoteDataSourceImpl(sl()),
+    () => AuthMockRemoteDataSource(),
   );
+  // sl.registerLazySingleton<AuthRemoteDataSource>(
+  //   () => AuthRemoteDataSourceImpl(sl()),
+  // );
 
   // Repository
   sl.registerLazySingleton<AuthRepository>(

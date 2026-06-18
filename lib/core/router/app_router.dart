@@ -3,7 +3,12 @@ import 'package:go_router/go_router.dart';
 import 'package:smart_stay_ai/features/auth/presentation/pages/info_screen.dart';
 import 'package:smart_stay_ai/features/auth/presentation/pages/login_screen.dart';
 import 'package:smart_stay_ai/features/auth/presentation/pages/register_screen.dart';
-import 'package:smart_stay_ai/features/booking/presentation/pages/booking_confirm_page.dart';
+import 'package:smart_stay_ai/features/booking/domain/entities/booking.dart';
+import 'package:smart_stay_ai/features/booking/presentation/models/booking_draft.dart';
+import 'package:smart_stay_ai/features/booking/presentation/pages/booking_confirmed_page.dart';
+import 'package:smart_stay_ai/features/booking/presentation/pages/booking_details_page.dart';
+import 'package:smart_stay_ai/features/booking/presentation/pages/guest_details_page.dart';
+import 'package:smart_stay_ai/features/booking/presentation/pages/payment_page.dart';
 import 'package:smart_stay_ai/features/hotel/domain/entities/hotel.dart';
 import 'package:smart_stay_ai/features/hotel/presentation/pages/hotel_detail_page.dart';
 import 'package:smart_stay_ai/features/main/presentation/pages/main_screen.dart';
@@ -26,13 +31,16 @@ class AppRoutes {
   static const hotelDetail = '/hotel-detail';
   static const rooms = '/rooms';
   static const roomDetail = '/room-detail';
-  static const bookingConfirm = '/booking-confirm';
+  static const bookingDetails = '/booking-details';
+  static const guestDetails = '/guest-details';
+  static const payment = '/payment';
+  static const bookingConfirmed = '/booking-confirmed';
 }
 
 /// Cấu hình điều hướng tập trung. Đây là NƠI DUY NHẤT biết tất cả các page,
 /// nhờ vậy các feature không phải import page của nhau.
 ///
-/// Dữ liệu phức tạp (Hotel, Room) được truyền qua `extra`.
+/// Dữ liệu phức tạp (Hotel, Room, BookingDraft...) được truyền qua `extra`.
 final GoRouter appRouter = GoRouter(
   initialLocation: AppRoutes.splash,
   routes: [
@@ -72,17 +80,36 @@ final GoRouter appRouter = GoRouter(
     GoRoute(
       path: AppRoutes.rooms,
       pageBuilder: (_, state) =>
-          _slide(state, RoomListPage(hotelName: state.extra as String)),
+          _slide(state, RoomListPage(hotel: state.extra as Hotel)),
     ),
     GoRoute(
       path: AppRoutes.roomDetail,
-      pageBuilder: (_, state) =>
-          _slide(state, RoomDetailPage(room: state.extra as Room)),
+      pageBuilder: (_, state) {
+        final (hotel, room) = state.extra as (Hotel, Room);
+        return _slide(state, RoomDetailPage(hotel: hotel, room: room));
+      },
     ),
     GoRoute(
-      path: AppRoutes.bookingConfirm,
+      path: AppRoutes.bookingDetails,
+      pageBuilder: (_, state) {
+        final (hotel, room) = state.extra as (Hotel, Room);
+        return _slide(state, BookingDetailsPage(hotel: hotel, room: room));
+      },
+    ),
+    GoRoute(
+      path: AppRoutes.guestDetails,
       pageBuilder: (_, state) =>
-          _slide(state, BookingConfirmPage(room: state.extra as Room)),
+          _slide(state, GuestDetailsPage(draft: state.extra as BookingDraft)),
+    ),
+    GoRoute(
+      path: AppRoutes.payment,
+      pageBuilder: (_, state) =>
+          _slide(state, PaymentPage(draft: state.extra as BookingDraft)),
+    ),
+    GoRoute(
+      path: AppRoutes.bookingConfirmed,
+      pageBuilder: (_, state) =>
+          _fade(state, BookingConfirmedPage(booking: state.extra as Booking)),
     ),
   ],
 );

@@ -110,7 +110,7 @@ class _BookingCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    '${booking.nights} đêm · ${booking.guests} khách',
+                    '${booking.nights} đêm · ${booking.totalGuests} khách',
                     style: const TextStyle(color: AppColors.textSecondary),
                   ),
                   const SizedBox(height: 10),

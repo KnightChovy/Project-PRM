@@ -16,6 +16,10 @@ class Hotel extends Equatable {
 
   final String description;
   final List<String> amenities;
+
+  /// Bộ ảnh cho carousel ở trang chi tiết. Có thể để trống.
+  final List<String> images;
+
   final String checkIn;
   final String checkOut;
 
@@ -30,11 +34,15 @@ class Hotel extends Equatable {
     this.oldPrice,
     this.description = '',
     this.amenities = const [],
+    this.images = const [],
     this.checkIn = '02:00 PM',
     this.checkOut = '12:00 PM',
   });
 
   bool get hasDiscount => oldPrice != null && oldPrice! > pricePerNight;
+
+  /// Danh sách ảnh để hiển thị carousel — nếu chưa có ảnh riêng thì dùng [imageUrl].
+  List<String> get gallery => images.isNotEmpty ? images : [imageUrl];
 
   @override
   List<Object?> get props => [
@@ -48,6 +56,7 @@ class Hotel extends Equatable {
         oldPrice,
         description,
         amenities,
+        images,
         checkIn,
         checkOut,
       ];

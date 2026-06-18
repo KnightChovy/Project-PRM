@@ -4,14 +4,22 @@ import '../entities/booking.dart';
 
 /// Hợp đồng cho việc đặt phòng. Domain khai báo, Data hiện thực.
 abstract interface class BookingRepository {
-  /// Tạo một lượt đặt phòng mới.
+  /// Tạo một lượt đặt phòng mới (repo tự sinh id + mã code).
   Future<Either<Failure, Booking>> createBooking({
+    required String hotelName,
+    required String location,
     required String roomName,
     required String imageUrl,
-    required double pricePerNight,
-    required int nights,
-    required int guests,
-    required double taxesAndFees,
+    required String guestName,
+    required DateTime checkIn,
+    required DateTime checkOut,
+    required String checkInTime,
+    required String checkOutTime,
+    required int adults,
+    required int children,
+    required double subtotal,
+    required double taxes,
+    required double discount,
   });
 
   /// Lấy danh sách đặt phòng của người dùng.

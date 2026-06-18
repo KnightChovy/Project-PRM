@@ -42,21 +42,21 @@ class BookingNotifier extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Tạo booking mới. Trả về true nếu thành công.
-  Future<bool> book(CreateBookingParams params) async {
+  /// Tạo booking mới. Trả về [Booking] vừa tạo, hoặc null nếu lỗi.
+  Future<Booking?> book(CreateBookingParams params) async {
     final result = await createBooking(params);
     return result.fold(
       (failure) {
         errorMessage = failure.message;
         notifyListeners();
-        return false;
+        return null;
       },
       (booking) {
         // Cập nhật lại danh sách để tab My Booking thấy ngay.
         bookings = [booking, ...bookings];
         status = BookingStatus.success;
         notifyListeners();
-        return true;
+        return booking;
       },
     );
   }

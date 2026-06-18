@@ -11,22 +11,41 @@ class BookingRepositoryImpl implements BookingRepository {
 
   @override
   Future<Either<Failure, Booking>> createBooking({
+    required String hotelName,
+    required String location,
     required String roomName,
     required String imageUrl,
-    required double pricePerNight,
-    required int nights,
-    required int guests,
-    required double taxesAndFees,
+    required String guestName,
+    required DateTime checkIn,
+    required DateTime checkOut,
+    required String checkInTime,
+    required String checkOutTime,
+    required int adults,
+    required int children,
+    required double subtotal,
+    required double taxes,
+    required double discount,
   }) async {
+    final now = DateTime.now();
+    final ms = now.millisecondsSinceEpoch;
     final booking = Booking(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      id: ms.toString(),
+      code: 'SS-${(ms % 1000000).toString().padLeft(6, '0')}',
+      hotelName: hotelName,
+      location: location,
       roomName: roomName,
       imageUrl: imageUrl,
-      pricePerNight: pricePerNight,
-      nights: nights,
-      guests: guests,
-      taxesAndFees: taxesAndFees,
-      createdAt: DateTime.now(),
+      guestName: guestName,
+      checkIn: checkIn,
+      checkOut: checkOut,
+      checkInTime: checkInTime,
+      checkOutTime: checkOutTime,
+      adults: adults,
+      children: children,
+      subtotal: subtotal,
+      taxes: taxes,
+      discount: discount,
+      createdAt: now,
     );
     local.add(booking);
     return Right(booking);

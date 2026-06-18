@@ -519,6 +519,12 @@ const _demoHotels = <Hotel>[
         'Khu nghỉ dưỡng bên bờ biển Aegean với hồ bơi vô cực hướng hoàng hôn, '
         'spa cao cấp và không gian riêng tư tuyệt đối.',
     amenities: ['WiFi', 'Pool', 'Spa', 'Gym', 'Restaurant', 'Private Beach'],
+    images: [
+      'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800',
+      'https://images.unsplash.com/photo-1505693416388-ac5ce068fe85?w=800',
+      'https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?w=800',
+      'https://images.unsplash.com/photo-1520250497591-112f2f40a3f4?w=800',
+    ],
   ),
   Hotel(
     id: '2',
@@ -533,5 +539,10 @@ const _demoHotels = <Hotel>[
         'Biệt thự cổ điển bên hồ Como với khu vườn Phục Hưng, nhà hàng tinh tế '
         'và tầm nhìn ra dãy Alps.',
     amenities: ['WiFi', 'Pool', 'Spa', 'Restaurant'],
+    images: [
+      'https://images.unsplash.com/photo-1566073771259-6a8506099945?w=800',
+      'https://images.unsplash.com/photo-1551882547-ff40c63fe5fa?w=800',
+      'https://images.unsplash.com/photo-1571896349842-33c89424de2d?w=800',
+    ],
   ),
 ];

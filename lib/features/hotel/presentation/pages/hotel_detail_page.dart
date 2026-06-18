@@ -30,7 +30,7 @@ class _HotelDetailPageState extends State<HotelDetailPage> {
         padding: EdgeInsets.zero,
         children: [
           _Header(
-            imageUrl: hotel.imageUrl,
+            images: hotel.gallery,
             saved: _saved,
             onBack: () => context.pop(),
             onToggleSaved: () => setState(() => _saved = !_saved),
@@ -94,7 +94,7 @@ class _HotelDetailPageState extends State<HotelDetailPage> {
       bottomNavigationBar: _BottomBar(
         pricePerNight: hotel.pricePerNight,
         onSeeRooms: () {
-          context.push(AppRoutes.rooms, extra: hotel.name);
+          context.push(AppRoutes.rooms, extra: hotel);
         },
       ),
     );
@@ -196,53 +196,85 @@ class _HotelDetailPageState extends State<HotelDetailPage> {
   }
 }
 
-/// Ảnh đầu trang + 3 nút tròn (back / lưu / thêm) + chấm chỉ trang.
-class _Header extends StatelessWidget {
+/// Carousel ảnh đầu trang (lướt ngang) + 3 nút tròn + chấm chỉ trang.
+class _Header extends StatefulWidget {
   const _Header({
-    required this.imageUrl,
+    required this.images,
     required this.saved,
     required this.onBack,
     required this.onToggleSaved,
   });
 
-  final String imageUrl;
+  final List<String> images;
   final bool saved;
   final VoidCallback onBack;
   final VoidCallback onToggleSaved;
 
   @override
+  State<_Header> createState() => _HeaderState();
+}
+
+class _HeaderState extends State<_Header> {
+  final _controller = PageController();
+  int _current = 0;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final images = widget.images;
     return SizedBox(
       height: 340,
       child: Stack(
         fit: StackFit.expand,
         children: [
-          AppNetworkImage(url: imageUrl),
-          SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  _RoundButton(icon: Icons.arrow_back, onTap: onBack),
-                  _RoundButton(
-                    icon: saved ? Icons.favorite : Icons.favorite_border,
-                    onTap: onToggleSaved,
-                  ),
-                  _RoundButton(icon: Icons.more_vert, onTap: () {}),
-                ],
+          // Carousel ảnh lướt ngang.
+          PageView.builder(
+            controller: _controller,
+            itemCount: images.length,
+            onPageChanged: (i) => setState(() => _current = i),
+            itemBuilder: (_, i) => AppNetworkImage(url: images[i]),
+          ),
+          // Đặt ở trên cùng để 3 nút không bị căn giữa theo chiều dọc.
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: SafeArea(
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    _RoundButton(icon: Icons.arrow_back, onTap: widget.onBack),
+                    _RoundButton(
+                      icon: widget.saved
+                          ? Icons.favorite
+                          : Icons.favorite_border,
+                      onTap: widget.onToggleSaved,
+                    ),
+                    _RoundButton(icon: Icons.more_vert, onTap: () {}),
+                  ],
+                ),
               ),
             ),
           ),
+          // Chấm chỉ trang đồng bộ với ảnh đang xem.
           Positioned(
             bottom: 16,
             left: 0,
             right: 0,
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
-              children: List.generate(4, (i) {
-                final active = i == 0;
-                return Container(
+              children: List.generate(images.length, (i) {
+                final active = i == _current;
+                return AnimatedContainer(
+                  duration: const Duration(milliseconds: 250),
                   margin: const EdgeInsets.symmetric(horizontal: 3),
                   width: active ? 18 : 7,
                   height: 7,

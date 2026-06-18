@@ -4,6 +4,7 @@ import 'package:smart_stay_ai/core/router/app_router.dart';
 import 'package:smart_stay_ai/core/theme/app_theme.dart';
 import 'package:smart_stay_ai/core/utils/amenity_icons.dart';
 import 'package:smart_stay_ai/core/widgets/app_network_image.dart';
+import 'package:smart_stay_ai/features/hotel/domain/entities/hotel.dart';
 import 'package:smart_stay_ai/features/rooms/domain/entities/room.dart';
 
 /// Trang danh sách các loại phòng (Deluxe, Standard, Suite...).
@@ -12,12 +13,12 @@ import 'package:smart_stay_ai/features/rooms/domain/entities/room.dart';
 /// NOTE: dùng dữ liệu mẫu [_demoRooms]. Khi có backend, lấy danh sách phòng
 /// theo hotelId qua UseCase + Notifier.
 class RoomListPage extends StatelessWidget {
-  const RoomListPage({super.key, required this.hotelName});
+  const RoomListPage({super.key, required this.hotel});
 
-  final String hotelName;
+  final Hotel hotel;
 
   void _openRoom(BuildContext context, Room room) {
-    context.push(AppRoutes.roomDetail, extra: room);
+    context.push(AppRoutes.roomDetail, extra: (hotel, room));
   }
 
   @override

@@ -4,12 +4,14 @@ import 'package:smart_stay_ai/core/router/app_router.dart';
 import 'package:smart_stay_ai/core/theme/app_theme.dart';
 import 'package:smart_stay_ai/core/utils/amenity_icons.dart';
 import 'package:smart_stay_ai/core/widgets/app_network_image.dart';
+import 'package:smart_stay_ai/features/hotel/domain/entities/hotel.dart';
 import 'package:smart_stay_ai/features/rooms/domain/entities/room.dart';
 
-/// Trang chi tiết một phòng. Nhận vào 1 [Room] để hiển thị + nút đặt phòng.
+/// Trang chi tiết một phòng. Nhận [hotel] + [room] để hiển thị & bắt đầu đặt.
 class RoomDetailPage extends StatelessWidget {
-  const RoomDetailPage({super.key, required this.room});
+  const RoomDetailPage({super.key, required this.hotel, required this.room});
 
+  final Hotel hotel;
   final Room room;
 
   @override
@@ -75,7 +77,8 @@ class RoomDetailPage extends StatelessWidget {
         ],
       ),
       bottomNavigationBar: _BookBar(
-        onBook: () => context.push(AppRoutes.bookingConfirm, extra: room),
+        onBook: () =>
+            context.push(AppRoutes.bookingDetails, extra: (hotel, room)),
       ),
     );
   }
