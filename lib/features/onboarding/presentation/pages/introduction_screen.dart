@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import 'package:smart_stay_ai/core/router/app_router.dart';
 import 'package:smart_stay_ai/core/theme/app_theme.dart';
-import 'package:smart_stay_ai/features/auth/presentation/pages/login_screen.dart';
 
 /// Dữ liệu cho từng trang giới thiệu.
 class _IntroPage {
@@ -46,9 +47,7 @@ class _IntroductionScreenState extends State<IntroductionScreen> {
   ];
 
   void _goToLogin() {
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => const LoginScreen()),
-    );
+    context.go(AppRoutes.login);
   }
 
   void _next() {

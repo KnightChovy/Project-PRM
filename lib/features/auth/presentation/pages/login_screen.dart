@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:smart_stay_ai/core/di/injection.dart';
+import 'package:smart_stay_ai/core/router/app_router.dart';
 import 'package:smart_stay_ai/core/theme/app_theme.dart';
 import 'package:smart_stay_ai/features/auth/presentation/providers/auth_notifier.dart';
-import 'register_screen.dart';
 
 /// Màn hình đăng nhập.
 class LoginScreen extends StatefulWidget {
@@ -33,9 +34,8 @@ class _LoginScreenState extends State<LoginScreen> {
     );
     if (!context.mounted) return;
     if (auth.status == AuthStatus.success) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Xin chào ${auth.user!.name}!')),
-      );
+      // Đăng nhập xong -> vào màn chính (có thanh điều hướng).
+      context.go(AppRoutes.home);
     } else if (auth.status == AuthStatus.error) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(auth.errorMessage ?? 'Đăng nhập thất bại')),
@@ -211,11 +211,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     style: TextStyle(color: AppColors.textSecondary),
                   ),
                   GestureDetector(
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => const RegisterScreen(),
-                      ),
-                    ),
+                    onTap: () => context.push(AppRoutes.register),
                     child: const Text(
                       'Sign Up',
                       style: TextStyle(

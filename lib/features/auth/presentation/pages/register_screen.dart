@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import 'package:smart_stay_ai/core/router/app_router.dart';
 import 'package:smart_stay_ai/core/theme/app_theme.dart';
-import 'info_screen.dart';
 
 /// Màn hình tạo tài khoản (bước 1 / 2).
 class RegisterScreen extends StatefulWidget {
@@ -32,9 +33,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   }
 
   void _createAccount() {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const InfoScreen()),
-    );
+    context.push(AppRoutes.info);
   }
 
   @override
@@ -205,7 +204,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       style: TextStyle(color: AppColors.textSecondary),
                     ),
                     GestureDetector(
-                      onTap: () => Navigator.of(context).pop(),
+                      onTap: () => context.pop(),
                       child: const Text(
                         'Login',
                         style: TextStyle(

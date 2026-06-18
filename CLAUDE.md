@@ -592,17 +592,17 @@ test('returns List<Hotel> when remote search succeeds', () async {
 
 ## 14. TECH STACK
 
-| Purpose               | Package                                 |
-| --------------------- | --------------------------------------- |
-| State management      | `provider` (`ChangeNotifier`)           |
-| Functional / Either   | `fpdart`                                |
-| Value equality        | `equatable`                             |
-| Immutable model/state | `freezed`, `json_serializable`          |
-| DI                    | `get_it` (+ `injectable`)               |
-| HTTP                  | `dio`                                   |
-| Local storage         | `shared_preferences` / `hive`           |
-| Routing               | `go_router`                             |
-| Testing               | `flutter_test`, `mocktail`              |
+| Purpose               | Package                        |
+| --------------------- | ------------------------------ |
+| State management      | `provider` (`ChangeNotifier`)  |
+| Functional / Either   | `fpdart`                       |
+| Value equality        | `equatable`                    |
+| Immutable model/state | `freezed`, `json_serializable` |
+| DI                    | `get_it` (+ `injectable`)      |
+| HTTP                  | `dio`                          |
+| Local storage         | `shared_preferences` / `hive`  |
+| Routing               | `go_router`                    |
+| Testing               | `flutter_test`, `mocktail`     |
 
 ---
 

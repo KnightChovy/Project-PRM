@@ -1,0 +1,115 @@
+import 'package:flutter/widgets.dart';
+import 'package:go_router/go_router.dart';
+import 'package:smart_stay_ai/features/auth/presentation/pages/info_screen.dart';
+import 'package:smart_stay_ai/features/auth/presentation/pages/login_screen.dart';
+import 'package:smart_stay_ai/features/auth/presentation/pages/register_screen.dart';
+import 'package:smart_stay_ai/features/booking/presentation/pages/booking_confirm_page.dart';
+import 'package:smart_stay_ai/features/hotel/domain/entities/hotel.dart';
+import 'package:smart_stay_ai/features/hotel/presentation/pages/hotel_detail_page.dart';
+import 'package:smart_stay_ai/features/main/presentation/pages/main_screen.dart';
+import 'package:smart_stay_ai/features/onboarding/presentation/pages/introduction_screen.dart';
+import 'package:smart_stay_ai/features/onboarding/presentation/pages/loading_screen.dart';
+import 'package:smart_stay_ai/features/rooms/domain/entities/room.dart';
+import 'package:smart_stay_ai/features/rooms/presentation/pages/room_detail_page.dart';
+import 'package:smart_stay_ai/features/rooms/presentation/pages/room_list_page.dart';
+
+/// Tên (đường dẫn) các route — khai báo 1 chỗ để tránh gõ chuỗi lung tung.
+class AppRoutes {
+  AppRoutes._();
+
+  static const splash = '/';
+  static const onboarding = '/onboarding';
+  static const login = '/login';
+  static const register = '/register';
+  static const info = '/info';
+  static const home = '/home';
+  static const hotelDetail = '/hotel-detail';
+  static const rooms = '/rooms';
+  static const roomDetail = '/room-detail';
+  static const bookingConfirm = '/booking-confirm';
+}
+
+/// Cấu hình điều hướng tập trung. Đây là NƠI DUY NHẤT biết tất cả các page,
+/// nhờ vậy các feature không phải import page của nhau.
+///
+/// Dữ liệu phức tạp (Hotel, Room) được truyền qua `extra`.
+final GoRouter appRouter = GoRouter(
+  initialLocation: AppRoutes.splash,
+  routes: [
+    // Mở app / đổi màn chính: hiệu ứng mờ dần (fade).
+    GoRoute(
+      path: AppRoutes.splash,
+      pageBuilder: (_, state) => _fade(state, const LoadingScreen()),
+    ),
+    GoRoute(
+      path: AppRoutes.onboarding,
+      pageBuilder: (_, state) => _fade(state, const IntroductionScreen()),
+    ),
+    GoRoute(
+      path: AppRoutes.login,
+      pageBuilder: (_, state) => _fade(state, const LoginScreen()),
+    ),
+    GoRoute(
+      path: AppRoutes.home,
+      // extra (nếu có) là index tab muốn mở sẵn (vd 2 = My Booking).
+      pageBuilder: (_, state) =>
+          _fade(state, MainScreen(initialIndex: state.extra as int? ?? 0)),
+    ),
+    // Đi sâu vào chi tiết: hiệu ứng trượt từ phải sang (slide).
+    GoRoute(
+      path: AppRoutes.register,
+      pageBuilder: (_, state) => _slide(state, const RegisterScreen()),
+    ),
+    GoRoute(
+      path: AppRoutes.info,
+      pageBuilder: (_, state) => _slide(state, const InfoScreen()),
+    ),
+    GoRoute(
+      path: AppRoutes.hotelDetail,
+      pageBuilder: (_, state) =>
+          _slide(state, HotelDetailPage(hotel: state.extra as Hotel)),
+    ),
+    GoRoute(
+      path: AppRoutes.rooms,
+      pageBuilder: (_, state) =>
+          _slide(state, RoomListPage(hotelName: state.extra as String)),
+    ),
+    GoRoute(
+      path: AppRoutes.roomDetail,
+      pageBuilder: (_, state) =>
+          _slide(state, RoomDetailPage(room: state.extra as Room)),
+    ),
+    GoRoute(
+      path: AppRoutes.bookingConfirm,
+      pageBuilder: (_, state) =>
+          _slide(state, BookingConfirmPage(room: state.extra as Room)),
+    ),
+  ],
+);
+
+/// Trang chuyển cảnh kiểu mờ dần.
+CustomTransitionPage<void> _fade(GoRouterState state, Widget child) {
+  return CustomTransitionPage<void>(
+    key: state.pageKey,
+    child: child,
+    transitionDuration: const Duration(milliseconds: 350),
+    transitionsBuilder: (_, animation, _, child) =>
+        FadeTransition(opacity: animation, child: child),
+  );
+}
+
+/// Trang chuyển cảnh kiểu trượt từ phải sang.
+CustomTransitionPage<void> _slide(GoRouterState state, Widget child) {
+  return CustomTransitionPage<void>(
+    key: state.pageKey,
+    child: child,
+    transitionDuration: const Duration(milliseconds: 300),
+    transitionsBuilder: (_, animation, _, child) {
+      final offset = Tween<Offset>(
+        begin: const Offset(1, 0),
+        end: Offset.zero,
+      ).chain(CurveTween(curve: Curves.easeInOut));
+      return SlideTransition(position: animation.drive(offset), child: child);
+    },
+  );
+}

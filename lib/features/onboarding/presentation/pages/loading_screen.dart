@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import 'package:smart_stay_ai/core/router/app_router.dart';
 import 'package:smart_stay_ai/core/theme/app_theme.dart';
-import 'introduction_screen.dart';
 
 /// Màn hình khởi động (splash) hiển thị khi mở app.
 class LoadingScreen extends StatefulWidget {
@@ -31,14 +32,7 @@ class _LoadingScreenState extends State<LoadingScreen>
     // Sau ~2.6s tự chuyển sang màn giới thiệu.
     Future.delayed(const Duration(milliseconds: 2600), () {
       if (!mounted) return;
-      Navigator.of(context).pushReplacement(
-        PageRouteBuilder(
-          transitionDuration: const Duration(milliseconds: 600),
-          pageBuilder: (_, _, _) => const IntroductionScreen(),
-          transitionsBuilder: (_, anim, _, child) =>
-              FadeTransition(opacity: anim, child: child),
-        ),
-      );
+      context.go(AppRoutes.onboarding);
     });
   }
 

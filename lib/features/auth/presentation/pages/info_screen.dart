@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:smart_stay_ai/core/theme/app_theme.dart';
 
 /// Mô tả 1 tiện ích must-have (có icon + nhãn).
@@ -51,7 +52,7 @@ class _InfoScreenState extends State<InfoScreen> {
                   IconButton(
                     icon: const Icon(Icons.arrow_back,
                         color: AppColors.textPrimary),
-                    onPressed: () => Navigator.of(context).pop(),
+                    onPressed: () => context.pop(),
                   ),
                   const Expanded(
                     child: Text(

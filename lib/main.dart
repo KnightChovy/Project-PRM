@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:smart_stay_ai/core/di/injection.dart';
+import 'package:smart_stay_ai/core/router/app_router.dart';
 import 'package:smart_stay_ai/core/theme/app_theme.dart';
-import 'package:smart_stay_ai/features/onboarding/presentation/pages/loading_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -14,11 +14,11 @@ class SmartStayApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
+    return MaterialApp.router(
       title: 'SmartStay',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light,
-      home: const LoadingScreen(),
+      routerConfig: appRouter,
     );
   }
 }
