@@ -42,6 +42,9 @@ dependencies:
   go_router: ^17.3.0
   qr_flutter: ^4.1.0
 
+  # Playfair Display + Be Vietnam Pro to match the SmartStay design mockups.
+  google_fonts: ^6.2.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
