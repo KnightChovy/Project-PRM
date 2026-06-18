@@ -58,7 +58,7 @@ ask instead of guessing.
 
 ```
 ┌────────────────────────────────────────────────┐
-│  PRESENTATION  (Flutter, BLoC/Cubit, Widgets)    │  ← depends on Domain
+│  PRESENTATION  (Flutter, Provider/Notifier, UI)  │  ← depends on Domain
 ├────────────────────────────────────────────────┤
 │  DOMAIN  (Entities, UseCases, Repo interfaces)   │  ← depends on nothing
 ├────────────────────────────────────────────────┤
@@ -118,10 +118,8 @@ lib/
 │       │       └── hotel_repository_impl.dart
 │       │
 │       └── presentation/
-│           ├── bloc/
-│           │   ├── hotel_search_bloc.dart
-│           │   ├── hotel_search_event.dart
-│           │   └── hotel_search_state.dart
+│           ├── providers/
+│           │   └── hotel_search_notifier.dart   # ChangeNotifier
 │           ├── pages/
 │           │   └── hotel_search_page.dart
 │           └── widgets/
@@ -365,54 +363,74 @@ class HotelRepositoryImpl implements HotelRepository {
 
 ## 7. PRESENTATION LAYER — State Management
 
-**Project default: `flutter_bloc` (Bloc/Cubit).** (Riverpod is acceptable if the
-team requires it, but it must be consistent across the whole app — NEVER mix.)
+**Project default: `provider` + `ChangeNotifier`.** (Do NOT use Bloc/Cubit or
+Riverpod. Keep ONE approach across the whole app — NEVER mix.)
 
 **Rules:**
 
-- Bloc/Cubit calls **UseCases only**, NEVER repositories directly.
-- State is immutable — use `freezed` or `Equatable`.
-- Widgets contain NO business logic and NEVER call UseCases directly.
-- Use `BlocBuilder` to render, `BlocListener` for side effects (navigation,
-  snackbars). NEVER navigate inside `BlocBuilder`.
+- Each feature has a `Notifier` (extends `ChangeNotifier`) in
+  `presentation/providers/`. It calls **UseCases only**, NEVER repositories directly.
+- The Notifier extends `ChangeNotifier` from `package:flutter/foundation.dart`
+  (NOT `material.dart`) — it must not touch `BuildContext` or widgets.
+- Hold state as simple fields (a `status` enum + data + `errorMessage`) and call
+  `notifyListeners()` after every change.
+- Widgets contain NO business logic and NEVER call UseCases directly. They read
+  state via `Consumer` / `context.watch`, and trigger actions via `context.read`.
+- Side effects (navigation, snackbars) happen in the widget AFTER awaiting the
+  notifier action — NEVER inside the `Consumer`/`build` itself.
 
 ```dart
-// state (freezed)
-@freezed
-sealed class HotelSearchState with _$HotelSearchState {
-  const factory HotelSearchState.initial() = _Initial;
-  const factory HotelSearchState.loading() = _Loading;
-  const factory HotelSearchState.loaded(List<Hotel> hotels) = _Loaded;
-  const factory HotelSearchState.error(String message) = _Error;
+// presentation/providers/hotel_search_notifier.dart
+import 'package:flutter/foundation.dart';
+
+enum HotelSearchStatus { initial, loading, loaded, error }
+
+class HotelSearchNotifier extends ChangeNotifier {
+  final SearchHotels searchHotels;
+  HotelSearchNotifier(this.searchHotels);
+
+  HotelSearchStatus status = HotelSearchStatus.initial;
+  List<Hotel> hotels = const [];
+  String? errorMessage;
+
+  bool get isLoading => status == HotelSearchStatus.loading;
+
+  Future<void> search(SearchHotelsParams params) async {
+    status = HotelSearchStatus.loading;
+    errorMessage = null;
+    notifyListeners();
+
+    final result = await searchHotels(params);
+    result.fold(
+      (failure) {
+        status = HotelSearchStatus.error;
+        errorMessage = failure.message;
+      },
+      (data) {
+        status = HotelSearchStatus.loaded;
+        hotels = data;
+      },
+    );
+    notifyListeners();
+  }
 }
 ```
 
 ```dart
-class HotelSearchBloc extends Bloc<HotelSearchEvent, HotelSearchState> {
-  final SearchHotels searchHotels;
-
-  HotelSearchBloc({required this.searchHotels})
-      : super(const HotelSearchState.initial()) {
-    on<HotelSearchSubmitted>(_onSubmitted);
-  }
-
-  Future<void> _onSubmitted(
-    HotelSearchSubmitted e,
-    Emitter<HotelSearchState> emit,
-  ) async {
-    emit(const HotelSearchState.loading());
-    final result = await searchHotels(SearchHotelsParams(
-      city: e.city,
-      checkIn: e.checkIn,
-      checkOut: e.checkOut,
-      guests: e.guests,
-    ));
-    result.fold(
-      (failure) => emit(HotelSearchState.error(failure.message)),
-      (hotels) => emit(HotelSearchState.loaded(hotels)),
-    );
-  }
-}
+// presentation/pages/hotel_search_page.dart (how the widget wires it)
+ChangeNotifierProvider(
+  create: (_) => sl<HotelSearchNotifier>(),
+  child: Consumer<HotelSearchNotifier>(
+    builder: (context, notifier, _) {
+      if (notifier.isLoading) return const CircularProgressIndicator();
+      // ...render notifier.hotels / notifier.errorMessage
+      return ElevatedButton(
+        onPressed: () => context.read<HotelSearchNotifier>().search(params),
+        child: const Text('Search'),
+      );
+    },
+  ),
+);
 ```
 
 ---
@@ -420,14 +438,14 @@ class HotelSearchBloc extends Bloc<HotelSearchEvent, HotelSearchState> {
 ## 8. DEPENDENCY INJECTION
 
 Use `get_it` (+ `injectable` if you want code-gen). Register in order:
-DataSource → Repository → UseCase → Bloc.
+DataSource → Repository → UseCase → Notifier.
 
 ```dart
 final sl = GetIt.instance;
 
 Future<void> initDependencies() async {
-  // Bloc — factory (new instance each time)
-  sl.registerFactory(() => HotelSearchBloc(searchHotels: sl()));
+  // Notifier — factory (new instance each time)
+  sl.registerFactory(() => HotelSearchNotifier(sl()));
 
   // UseCase — lazy singleton
   sl.registerLazySingleton(() => SearchHotels(sl()));
@@ -454,7 +472,7 @@ Future<void> initDependencies() async {
 
 - `Exception` exists ONLY in the Data layer (thrown by DataSources).
 - `Failure` is the only thing that travels up to Domain/Presentation.
-- NEVER use `try/catch` in Bloc or UseCase — they receive `Either` and `.fold`.
+- NEVER use `try/catch` in a Notifier or UseCase — they receive `Either` and `.fold`.
 
 ```dart
 // core/error/failures.dart
@@ -528,7 +546,8 @@ class ApiInterceptor extends Interceptor {
 ## 12. TESTING (required for logic)
 
 - **UseCases & RepositoryImpls: MUST have unit tests** (that's where logic lives).
-- Bloc: use `bloc_test`.
+- Notifier: test it like a plain class — call its methods, then assert on its
+  `status` / data fields (use a mocked UseCase).
 - Mock with `mocktail`.
 - Widget tests for key screens.
 - Every PR that adds logic must include matching tests.
@@ -562,9 +581,9 @@ test('returns List<Hotel> when remote search succeeds', () async {
 
 **DON'T ❌**
 
-- Call APIs or read the DB directly in widgets or Blocs.
+- Call APIs or read the DB directly in widgets or Notifiers.
 - Return a `Model` to Presentation (return the `Entity`).
-- Catch `Exception` inside Bloc/UseCase.
+- Catch `Exception` inside a Notifier/UseCase.
 - Put business logic in widgets.
 - Let Domain know about JSON, HTTP, SharedPreferences, or `BuildContext`.
 - Cross-import another feature's `data/`/`presentation/`.
@@ -575,7 +594,7 @@ test('returns List<Hotel> when remote search succeeds', () async {
 
 | Purpose               | Package                                 |
 | --------------------- | --------------------------------------- |
-| State management      | `flutter_bloc`                          |
+| State management      | `provider` (`ChangeNotifier`)           |
 | Functional / Either   | `fpdart`                                |
 | Value equality        | `equatable`                             |
 | Immutable model/state | `freezed`, `json_serializable`          |
@@ -583,7 +602,7 @@ test('returns List<Hotel> when remote search succeeds', () async {
 | HTTP                  | `dio`                                   |
 | Local storage         | `shared_preferences` / `hive`           |
 | Routing               | `go_router`                             |
-| Testing               | `flutter_test`, `bloc_test`, `mocktail` |
+| Testing               | `flutter_test`, `mocktail`              |
 
 ---
 

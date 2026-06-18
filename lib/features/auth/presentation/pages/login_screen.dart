@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:provider/provider.dart';
 import 'package:smart_stay_ai/core/di/injection.dart';
 import 'package:smart_stay_ai/core/theme/app_theme.dart';
-import 'package:smart_stay_ai/features/auth/presentation/bloc/auth_bloc.dart';
+import 'package:smart_stay_ai/features/auth/presentation/providers/auth_notifier.dart';
 import 'register_screen.dart';
 
 /// Màn hình đăng nhập.
@@ -25,29 +25,35 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
+  /// Bấm LOGIN -> gọi notifier, đợi xong rồi báo kết quả cho người dùng.
+  Future<void> _onLogin(BuildContext context, AuthNotifier auth) async {
+    await auth.login(
+      email: _emailCtrl.text.trim(),
+      password: _passCtrl.text,
+    );
+    if (!context.mounted) return;
+    if (auth.status == AuthStatus.success) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Xin chào ${auth.user!.name}!')),
+      );
+    } else if (auth.status == AuthStatus.error) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(auth.errorMessage ?? 'Đăng nhập thất bại')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    // Cấp AuthBloc cho cây widget này (lấy từ DI - service locator).
-    return BlocProvider(
-      create: (_) => sl<AuthBloc>(),
+    // Cấp AuthNotifier cho cây widget này (lấy từ DI - service locator).
+    return ChangeNotifierProvider(
+      create: (_) => sl<AuthNotifier>(),
       child: Scaffold(
         body: SafeArea(
-          // BlocConsumer = vừa "nghe" trạng thái (báo lỗi / thành công),
-          // vừa vẽ lại UI theo trạng thái hiện tại.
-          child: BlocConsumer<AuthBloc, AuthState>(
-            listener: (context, state) {
-              if (state is AuthSuccess) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Xin chào ${state.user.name}!')),
-                );
-              } else if (state is AuthError) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text(state.message)),
-                );
-              }
-            },
-            builder: (context, state) {
-              final loading = state is AuthLoading;
+          // Consumer = lắng nghe AuthNotifier và vẽ lại UI khi trạng thái đổi.
+          child: Consumer<AuthNotifier>(
+            builder: (context, auth, _) {
+              final loading = auth.isLoading;
               return SingleChildScrollView(
                 padding: const EdgeInsets.symmetric(horizontal: 24),
                 child: Column(
@@ -124,15 +130,8 @@ class _LoginScreenState extends State<LoginScreen> {
               SizedBox(
                 height: 60,
                 child: ElevatedButton(
-                  // Bấm LOGIN -> gửi sự kiện vào Bloc; khi đang loading thì khóa nút.
-                  onPressed: loading
-                      ? null
-                      : () => context.read<AuthBloc>().add(
-                            AuthLoginRequested(
-                              email: _emailCtrl.text.trim(),
-                              password: _passCtrl.text,
-                            ),
-                          ),
+                  // Khi đang loading thì khóa nút để tránh bấm nhiều lần.
+                  onPressed: loading ? null : () => _onLogin(context, auth),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.surface,
                     foregroundColor: AppColors.textPrimary,

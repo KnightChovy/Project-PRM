@@ -5,7 +5,7 @@ import 'package:smart_stay_ai/features/auth/data/repositories/auth_repository_im
 import 'package:smart_stay_ai/features/auth/domain/repositories/auth_repository.dart';
 import 'package:smart_stay_ai/features/auth/domain/usecases/login_user.dart';
 import 'package:smart_stay_ai/features/auth/domain/usecases/register_user.dart';
-import 'package:smart_stay_ai/features/auth/presentation/bloc/auth_bloc.dart';
+import 'package:smart_stay_ai/features/auth/presentation/providers/auth_notifier.dart';
 
 /// "Service Locator" — nơi khai báo mọi phụ thuộc của app.
 final sl = GetIt.instance;
@@ -30,6 +30,6 @@ Future<void> initDependencies() async {
   sl.registerLazySingleton(() => LoginUser(sl()));
   sl.registerLazySingleton(() => RegisterUser(sl()));
 
-  // Bloc (factory: tạo mới mỗi lần dùng)
-  sl.registerFactory(() => AuthBloc(loginUser: sl(), registerUser: sl()));
+  // Notifier (factory: tạo mới mỗi lần dùng)
+  sl.registerFactory(() => AuthNotifier(loginUser: sl(), registerUser: sl()));
 }

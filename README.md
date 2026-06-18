@@ -16,7 +16,7 @@ trong** — `Presentation → Domain ← Data`.
 
 | Tầng             | Biết Flutter? | Biết JSON/API? | Chứa logic nghiệp vụ? | Nhiệm vụ                              |
 | ---------------- | :-----------: | :------------: | :-------------------: | ------------------------------------- |
-| **Presentation** |      ✅       |       ❌       |          ❌           | Vẽ UI, nhận thao tác (Bloc + Widget)  |
+| **Presentation** |      ✅       |       ❌       |          ❌           | Vẽ UI, nhận thao tác (Provider + Widget) |
 | **Domain**       |      ❌       |       ❌       |          ✅           | Trung tâm: Entity, UseCase, Interface |
 | **Data**         |      ❌       |       ✅       |          ❌           | Gọi API, map JSON, hiện thực Repo      |
 
@@ -24,11 +24,12 @@ trong** — `Presentation → Domain ← Data`.
 
 ```
 UI (Page)
-  → gửi event → Bloc
+  → gọi method → Notifier (ChangeNotifier)
     → gọi → UseCase
       → gọi → Repository (interface, ở Domain)
         ← được hiện thực bởi → RepositoryImpl (Data)
           → gọi → RemoteDataSource → API (dio)
+  ← Notifier cập nhật status + notifyListeners() → UI vẽ lại
 ```
 
 Lỗi đi ngược lên dưới dạng `Either<Failure, T>` (dùng `fpdart`), xử lý bằng `.fold()`
@@ -61,7 +62,7 @@ lib/
 │   │   │   ├── datasources/     →  auth_remote_data_source.dart (gọi API)
 │   │   │   └── repositories/    →  auth_repository_impl.dart (Exception → Failure)
 │   │   └── presentation/     # Flutter
-│   │       ├── bloc/           →  auth_bloc.dart + auth_event.dart + auth_state.dart
+│   │       ├── providers/      →  auth_notifier.dart (ChangeNotifier)
 │   │       ├── pages/          →  login/register/info_screen.dart
 │   │       └── widgets/
 │   │
@@ -110,7 +111,7 @@ flutter analyze
 
 | Mục đích             | Package        |
 | -------------------- | -------------- |
-| Quản lý trạng thái   | `flutter_bloc` |
+| Quản lý trạng thái   | `provider` (`ChangeNotifier`) |
 | Xử lý lỗi (`Either`) | `fpdart`       |
 | So sánh giá trị      | `equatable`    |
 | Tiêm phụ thuộc (DI)  | `get_it`       |
@@ -124,14 +125,14 @@ Làm theo đúng mẫu của feature `auth`, theo thứ tự từ trong ra ngoà
 
 1. **Domain**: tạo `entity` → `repository` (interface) → `usecase`.
 2. **Data**: tạo `model` (fromJson/toJson) → `datasource` → `repository_impl`.
-3. **Presentation**: tạo `bloc` (event/state) → `page`.
+3. **Presentation**: tạo `notifier` (ChangeNotifier) → `page`.
 4. **DI**: đăng ký trong `core/di/injection.dart` theo thứ tự
-   DataSource → Repository → UseCase → Bloc.
+   DataSource → Repository → UseCase → Notifier.
 
 ### Vài quy tắc vàng cần nhớ
 
 - ✅ Domain chỉ là Dart thuần — **không** import `flutter`, `dio`, JSON.
-- ✅ Bloc gọi **UseCase**, không gọi thẳng Repository hay API.
+- ✅ Notifier gọi **UseCase**, không gọi thẳng Repository hay API.
 - ✅ Map JSON chỉ làm trong `Model` (tầng Data).
 - ✅ Trả `Either<Failure, T>` giữa các tầng; Widget không chứa logic.
 - ❌ Không import chéo `data/` hay `presentation/` của feature khác — chỉ tái dùng
