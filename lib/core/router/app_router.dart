@@ -10,8 +10,13 @@ import 'package:smart_stay_ai/features/booking/presentation/pages/booking_detail
 import 'package:smart_stay_ai/features/booking/presentation/pages/guest_details_page.dart';
 import 'package:smart_stay_ai/features/booking/presentation/pages/payment_page.dart';
 import 'package:smart_stay_ai/features/hotel/domain/entities/hotel.dart';
+import 'package:smart_stay_ai/features/hotel/presentation/models/hotel_filter.dart';
+import 'package:smart_stay_ai/features/hotel/presentation/pages/filter_sort_page.dart';
 import 'package:smart_stay_ai/features/hotel/presentation/pages/hotel_detail_page.dart';
+import 'package:smart_stay_ai/features/hotel/presentation/pages/hotel_search_page.dart';
+import 'package:smart_stay_ai/features/hotel/presentation/pages/map_view_page.dart';
 import 'package:smart_stay_ai/features/main/presentation/pages/main_screen.dart';
+import 'package:smart_stay_ai/features/review/presentation/pages/guest_reviews_page.dart';
 import 'package:smart_stay_ai/features/onboarding/presentation/pages/introduction_screen.dart';
 import 'package:smart_stay_ai/features/onboarding/presentation/pages/loading_screen.dart';
 import 'package:smart_stay_ai/features/rooms/domain/entities/room.dart';
@@ -34,6 +39,10 @@ class AppRoutes {
   static const register = '/register';
   static const info = '/info';
   static const home = '/home';
+  static const hotelSearch = '/hotel-search';
+  static const filterSort = '/filter-sort';
+  static const mapView = '/map-view';
+  static const guestReviews = '/guest-reviews';
   static const hotelDetail = '/hotel-detail';
   static const rooms = '/rooms';
   static const roomDetail = '/room-detail';
@@ -79,6 +88,27 @@ final GoRouter appRouter = GoRouter(
     GoRoute(
       path: AppRoutes.register,
       pageBuilder: (_, state) => _slide(state, const RegisterScreen()),
+    ),
+    GoRoute(
+      path: AppRoutes.hotelSearch,
+      // extra (nếu có) là từ khoá tìm kiếm sẵn.
+      pageBuilder: (_, state) =>
+          _slide(state, HotelSearchPage(initialQuery: state.extra as String? ?? '')),
+    ),
+    GoRoute(
+      path: AppRoutes.filterSort,
+      // extra là bộ lọc hiện tại; màn này pop về một HotelFilter mới.
+      pageBuilder: (_, state) => _slide(
+          state, FilterSortPage(initial: state.extra as HotelFilter? ?? const HotelFilter())),
+    ),
+    GoRoute(
+      path: AppRoutes.mapView,
+      pageBuilder: (_, state) => _slide(state, const MapViewPage()),
+    ),
+    GoRoute(
+      path: AppRoutes.guestReviews,
+      pageBuilder: (_, state) =>
+          _slide(state, GuestReviewsPage(hotel: state.extra as Hotel)),
     ),
     GoRoute(
       path: AppRoutes.info,
