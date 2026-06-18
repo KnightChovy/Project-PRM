@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-
-import 'package:smart_stay_ai/screens/login_screen.dart';
-import 'package:smart_stay_ai/screens/register_screen.dart';
+import 'package:smart_stay_ai/features/auth/presentation/pages/login_screen.dart';
+import 'package:smart_stay_ai/features/auth/presentation/pages/register_screen.dart';
 
 void main() {
   Future<void> pumpLogin(WidgetTester tester) async {

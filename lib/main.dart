@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
-import 'theme/app_theme.dart';
-import 'screens/loading_screen.dart';
+import 'package:smart_stay_ai/core/di/injection.dart';
+import 'package:smart_stay_ai/core/router/app_router.dart';
+import 'package:smart_stay_ai/core/theme/app_theme.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await initDependencies(); // Khởi tạo DI trước khi chạy app.
   runApp(const SmartStayApp());
 }
 
@@ -11,11 +14,11 @@ class SmartStayApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
+    return MaterialApp.router(
       title: 'SmartStay',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light,
-      home: const LoadingScreen(),
+      routerConfig: appRouter,
     );
   }
 }

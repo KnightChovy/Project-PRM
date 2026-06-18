@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-
-import 'package:smart_stay_ai/screens/info_screen.dart';
-import 'package:smart_stay_ai/theme/app_theme.dart';
+import 'package:smart_stay_ai/core/theme/app_theme.dart';
+import 'package:smart_stay_ai/features/auth/presentation/pages/info_screen.dart';
 
 void main() {
   Future<void> pumpInfo(WidgetTester tester) async {
@@ -12,10 +11,12 @@ void main() {
   // Lấy màu nền của khối chip/card chứa [label] để kiểm tra trạng thái chọn.
   Color? containerColorOf(WidgetTester tester, String label) {
     final container = tester.widget<AnimatedContainer>(
-      find.ancestor(
-        of: find.text(label),
-        matching: find.byType(AnimatedContainer),
-      ).first,
+      find
+          .ancestor(
+            of: find.text(label),
+            matching: find.byType(AnimatedContainer),
+          )
+          .first,
     );
     return (container.decoration as BoxDecoration).color;
   }
