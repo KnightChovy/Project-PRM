@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:smart_stay_ai/core/theme/app_theme.dart';
 // Đổi bởi BinhKhiem: tab Bookings dùng bản nâng cấp (3 tab + Cancel/Review).
 // Bản cũ my_booking_page.dart của Phat vẫn được giữ nguyên trong repo.
 import 'package:smart_stay_ai/features/booking/presentation/pages/my_bookings_view_page.dart';
@@ -7,6 +6,7 @@ import 'package:smart_stay_ai/features/booking/presentation/pages/my_bookings_vi
 import 'package:smart_stay_ai/features/assistant/presentation/pages/assistant_page.dart';
 import 'package:smart_stay_ai/features/home/presentation/pages/home_page.dart';
 import 'package:smart_stay_ai/features/main/presentation/widgets/main_bottom_nav.dart';
+import 'package:smart_stay_ai/features/profile/presentation/pages/profile_page.dart';
 import 'package:smart_stay_ai/features/wishlist/presentation/pages/wishlist_page.dart';
 
 /// Màn hình "vỏ" sau khi đăng nhập: chứa thanh điều hướng đáy + 5 tab.
@@ -24,13 +24,12 @@ class MainScreen extends StatefulWidget {
 class _MainScreenState extends State<MainScreen> {
   late int _index = widget.initialIndex;
 
-  // Tạm thời các tab chưa làm là trang placeholder. Khi xong feature thì thay.
   static const _pages = <Widget>[
     HomePage(),
     WishlistPage(),
     MyBookingsViewPage(),
     AssistantPage(),
-    _PlaceholderPage(icon: Icons.person_outline, title: 'Profile'),
+    ProfilePage(),
   ];
 
   @override
@@ -40,43 +39,6 @@ class _MainScreenState extends State<MainScreen> {
       bottomNavigationBar: MainBottomNav(
         currentIndex: _index,
         onTap: (i) => setState(() => _index = i),
-      ),
-    );
-  }
-}
-
-/// Trang tạm cho mỗi tab — chỉ hiện icon + tên để biết đang ở đâu.
-class _PlaceholderPage extends StatelessWidget {
-  const _PlaceholderPage({required this.icon, required this.title});
-
-  final IconData icon;
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 64, color: AppColors.goldLight),
-            const SizedBox(height: 16),
-            Text(
-              title,
-              style: const TextStyle(
-                fontFamily: 'Georgia',
-                fontSize: 26,
-                fontWeight: FontWeight.bold,
-                color: AppColors.textPrimary,
-              ),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Đang phát triển...',
-              style: TextStyle(color: AppColors.textSecondary),
-            ),
-          ],
-        ),
       ),
     );
   }
