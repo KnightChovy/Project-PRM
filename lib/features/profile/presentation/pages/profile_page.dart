@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../../../core/router/app_router.dart';
 import '../../../../core/theme/app_theme.dart';
 import 'change_password_page.dart';
 import 'edit_profile_page.dart';
@@ -10,6 +12,32 @@ import 'notification_settings_page.dart';
 /// ponytail: local-only; wire a profile bloc when it actually loads from the API.
 class ProfilePage extends StatelessWidget {
   const ProfilePage({super.key});
+
+  /// Hỏi xác nhận rồi đăng xuất: xoá toàn bộ stack và quay về màn đăng nhập.
+  Future<void> _confirmLogout(BuildContext context) async {
+    final shouldLogout = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Log Out'),
+        content: const Text('Are you sure you want to log out?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(foregroundColor: AppTheme.error),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Log Out'),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldLogout != true || !context.mounted) return;
+    // go() thay vì push() để dọn sạch lịch sử điều hướng sau khi đăng xuất.
+    context.go(AppRoutes.login);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -54,7 +82,7 @@ class ProfilePage extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
               ),
-              onPressed: () {},
+              onPressed: () => _confirmLogout(context),
               child: const Text('Log Out', style: TextStyle(fontWeight: FontWeight.w500)),
             ),
             const SizedBox(height: 16),
