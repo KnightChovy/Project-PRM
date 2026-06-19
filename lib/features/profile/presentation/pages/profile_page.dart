@@ -69,7 +69,6 @@ class ProfilePage extends StatelessWidget {
           ],
         ),
       ),
-      bottomNavigationBar: const _BottomNav(),
     );
   }
 }
@@ -351,26 +350,6 @@ class _MenuList extends StatelessWidget {
           ],
         ],
       ),
-    );
-  }
-}
-
-class _BottomNav extends StatelessWidget {
-  const _BottomNav();
-
-  @override
-  Widget build(BuildContext context) {
-    return NavigationBar(
-      selectedIndex: 4,
-      backgroundColor: AppTheme.surface.withValues(alpha: 0.9),
-      onDestinationSelected: (_) {},
-      destinations: const [
-        NavigationDestination(icon: Icon(Icons.home_outlined), label: 'Home'),
-        NavigationDestination(icon: Icon(Icons.favorite_outline), label: 'Wishlist'),
-        NavigationDestination(icon: Icon(Icons.calendar_month_outlined), label: 'Bookings'),
-        NavigationDestination(icon: Icon(Icons.smart_toy_outlined), label: 'Chatbot'),
-        NavigationDestination(icon: Icon(Icons.person), label: 'Profile'),
-      ],
     );
   }
 }
