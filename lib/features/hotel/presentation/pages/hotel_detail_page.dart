@@ -45,9 +45,22 @@ class _HotelDetailPageState extends State<HotelDetailPage> {
                 const SizedBox(height: 10),
                 _locationRow(),
                 const SizedBox(height: 6),
-                Text(
-                  '${hotel.rating} (${hotel.reviewCount} Reviews)',
-                  style: const TextStyle(color: AppColors.textSecondary),
+                GestureDetector(
+                  onTap: () =>
+                      context.push(AppRoutes.guestReviews, extra: hotel),
+                  child: Row(
+                    children: [
+                      Text(
+                        '${hotel.rating} (${hotel.reviewCount} Reviews)',
+                        style: const TextStyle(
+                          color: AppColors.goldDark,
+                          decoration: TextDecoration.underline,
+                        ),
+                      ),
+                      const Icon(Icons.chevron_right,
+                          size: 18, color: AppColors.goldDark),
+                    ],
+                  ),
                 ),
                 const SizedBox(height: 20),
                 const _AiInsightCard(),
@@ -165,7 +178,10 @@ class _HotelDetailPageState extends State<HotelDetailPage> {
         return Expanded(
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
-            onTap: () => setState(() => _tab = i),
+            // Tab "Reviews" mở thẳng màn Guest Reviews; các tab khác đổi nội dung.
+            onTap: () => _tabs[i] == 'Reviews'
+                ? context.push(AppRoutes.guestReviews, extra: hotel)
+                : setState(() => _tab = i),
             child: Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: Column(

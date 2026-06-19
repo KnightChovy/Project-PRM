@@ -5,6 +5,7 @@ import 'package:smart_stay_ai/core/theme/app_theme.dart';
 import 'package:smart_stay_ai/features/booking/presentation/pages/my_bookings_view_page.dart';
 // Đổi bởi BinhKhiem: tab Chatbot dùng màn AI Assistant.
 import 'package:smart_stay_ai/features/assistant/presentation/pages/assistant_page.dart';
+import 'package:smart_stay_ai/features/home/presentation/pages/home_page.dart';
 import 'package:smart_stay_ai/features/main/presentation/widgets/main_bottom_nav.dart';
 import 'package:smart_stay_ai/features/wishlist/presentation/pages/wishlist_page.dart';
 
@@ -25,7 +26,7 @@ class _MainScreenState extends State<MainScreen> {
 
   // Tạm thời các tab chưa làm là trang placeholder. Khi xong feature thì thay.
   static const _pages = <Widget>[
-    _PlaceholderPage(icon: Icons.home_rounded, title: 'Home'),
+    HomePage(),
     WishlistPage(),
     MyBookingsViewPage(),
     AssistantPage(),
