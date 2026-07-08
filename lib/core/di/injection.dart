@@ -1,11 +1,20 @@
 import 'package:get_it/get_it.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:smart_stay_ai/core/network/dio_client.dart';
-import 'package:smart_stay_ai/features/auth/data/datasources/auth_mock_remote_data_source.dart';
+import 'package:smart_stay_ai/core/network/token_storage.dart';
+// import 'package:smart_stay_ai/features/auth/data/datasources/auth_mock_remote_data_source.dart';
 import 'package:smart_stay_ai/features/auth/data/datasources/auth_remote_data_source.dart';
 import 'package:smart_stay_ai/features/auth/data/repositories/auth_repository_impl.dart';
 import 'package:smart_stay_ai/features/auth/domain/repositories/auth_repository.dart';
+import 'package:smart_stay_ai/features/auth/domain/usecases/forgot_password.dart';
 import 'package:smart_stay_ai/features/auth/domain/usecases/login_user.dart';
+import 'package:smart_stay_ai/features/auth/domain/usecases/logout_user.dart';
+import 'package:smart_stay_ai/features/auth/domain/usecases/refresh_tokens.dart';
 import 'package:smart_stay_ai/features/auth/domain/usecases/register_user.dart';
+import 'package:smart_stay_ai/features/auth/domain/usecases/reset_password.dart';
+import 'package:smart_stay_ai/features/auth/domain/usecases/send_otp.dart';
+import 'package:smart_stay_ai/features/auth/domain/usecases/send_verification_email.dart';
+import 'package:smart_stay_ai/features/auth/domain/usecases/verify_email.dart';
 import 'package:smart_stay_ai/features/auth/presentation/providers/auth_notifier.dart';
 import 'package:smart_stay_ai/features/booking/data/datasources/booking_local_data_source.dart';
 import 'package:smart_stay_ai/features/booking/data/repositories/booking_repository_impl.dart';
@@ -38,29 +47,50 @@ final sl = GetIt.instance;
 /// Gọi 1 lần ở main() trước runApp().
 Future<void> initDependencies() async {
   // ---- Core ----
-  sl.registerLazySingleton(() => DioClient());
+  final prefs = await SharedPreferences.getInstance();
+  sl.registerLazySingleton(() => TokenStorage(prefs));
+  sl.registerLazySingleton(() => DioClient(sl()));
 
   // ---- Feature: auth ----
-  // DataSource — đang dùng MOCK (chưa có backend).
-  // Khi có API thật: đổi sang AuthRemoteDataSourceImpl(sl()).
+  // DataSource — gọi API thật của smartstayai-system.
   sl.registerLazySingleton<AuthRemoteDataSource>(
-    () => AuthMockRemoteDataSource(),
+    () => AuthRemoteDataSourceImpl(sl()),
   );
+  // Chưa có backend? Đổi sang bản giả lập:
   // sl.registerLazySingleton<AuthRemoteDataSource>(
-  //   () => AuthRemoteDataSourceImpl(sl()),
+  //   () => AuthMockRemoteDataSource(),
   // );
 
   // Repository
   sl.registerLazySingleton<AuthRepository>(
-    () => AuthRepositoryImpl(sl()),
+    () => AuthRepositoryImpl(remote: sl(), tokenStorage: sl()),
   );
 
   // UseCase
   sl.registerLazySingleton(() => LoginUser(sl()));
   sl.registerLazySingleton(() => RegisterUser(sl()));
+  sl.registerLazySingleton(() => LogoutUser(sl()));
+  sl.registerLazySingleton(() => SendOtp(sl()));
+  sl.registerLazySingleton(() => RefreshTokens(sl()));
+  sl.registerLazySingleton(() => ForgotPassword(sl()));
+  sl.registerLazySingleton(() => ResetPassword(sl()));
+  sl.registerLazySingleton(() => SendVerificationEmail(sl()));
+  sl.registerLazySingleton(() => VerifyEmail(sl()));
 
   // Notifier (factory: tạo mới mỗi lần dùng)
-  sl.registerFactory(() => AuthNotifier(loginUser: sl(), registerUser: sl()));
+  sl.registerFactory(
+    () => AuthNotifier(
+      loginUser: sl(),
+      registerUser: sl(),
+      logoutUser: sl(),
+      sendOtpUseCase: sl(),
+      refreshTokensUseCase: sl(),
+      forgotPasswordUseCase: sl(),
+      resetPasswordUseCase: sl(),
+      sendVerificationEmailUseCase: sl(),
+      verifyEmailUseCase: sl(),
+    ),
+  );
 
   // ---- Feature: booking ----
   // DataSource (singleton: giữ danh sách booking trong RAM)

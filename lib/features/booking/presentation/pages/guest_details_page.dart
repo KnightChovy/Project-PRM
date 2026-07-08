@@ -69,12 +69,37 @@ class _GuestDetailsPageState extends State<GuestDetailsPage> {
   }
 
   void _continue() {
+    final firstName = _firstCtrl.text.trim();
+    final lastName = _lastCtrl.text.trim();
+    final email = _emailCtrl.text.trim();
+    final phone = _phoneCtrl.text.trim();
+
+    String? error;
+    if (firstName.isEmpty || lastName.isEmpty) {
+      error = 'Please enter the guest full name.';
+    } else if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email)) {
+      error = 'Please enter a valid email address.';
+    } else if (phone.length < 8) {
+      error = 'Please enter a valid phone number.';
+    } else if (_nationality == null) {
+      error = 'Please select nationality.';
+    } else if (_arrival == null) {
+      error = 'Please select arrival time.';
+    }
+
+    if (error != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error)));
+      return;
+    }
+
     final draft = widget.draft.copyWith(
       bookingForSelf: _forSelf,
-      firstName: _firstCtrl.text.trim(),
-      lastName: _lastCtrl.text.trim(),
-      email: _emailCtrl.text.trim(),
-      phone: _phoneCtrl.text.trim(),
+      firstName: firstName,
+      lastName: lastName,
+      email: email,
+      phone: phone,
       nationality: _nationality ?? '',
       arrivalTime: _arrival?.format(context) ?? '',
     );
@@ -175,8 +200,10 @@ class _GuestDetailsPageState extends State<GuestDetailsPage> {
               style: OutlinedButton.styleFrom(
                 foregroundColor: AppColors.textPrimary,
                 side: const BorderSide(color: AppColors.goldLight),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 14,
+                ),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(30),
                 ),
@@ -250,8 +277,10 @@ class _GuestDetailsPageState extends State<GuestDetailsPage> {
           initialValue: _nationality,
           isExpanded: true,
           hint: const Text('Select'),
-          icon: const Icon(Icons.keyboard_arrow_down,
-              color: AppColors.textSecondary),
+          icon: const Icon(
+            Icons.keyboard_arrow_down,
+            color: AppColors.textSecondary,
+          ),
           decoration: const InputDecoration(
             enabledBorder: UnderlineInputBorder(
               borderSide: BorderSide(color: AppColors.goldLight),
@@ -284,9 +313,7 @@ class _GuestDetailsPageState extends State<GuestDetailsPage> {
           child: Container(
             padding: const EdgeInsets.symmetric(vertical: 14),
             decoration: const BoxDecoration(
-              border: Border(
-                bottom: BorderSide(color: AppColors.goldLight),
-              ),
+              border: Border(bottom: BorderSide(color: AppColors.goldLight)),
             ),
             child: Row(
               children: [
@@ -300,8 +327,11 @@ class _GuestDetailsPageState extends State<GuestDetailsPage> {
                     ),
                   ),
                 ),
-                const Icon(Icons.access_time,
-                    size: 20, color: AppColors.textSecondary),
+                const Icon(
+                  Icons.access_time,
+                  size: 20,
+                  color: AppColors.textSecondary,
+                ),
               ],
             ),
           ),
@@ -402,8 +432,10 @@ class _LabeledField extends StatelessWidget {
               if (autoFilled) ...[
                 const SizedBox(width: 8),
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
                     color: AppColors.goldLight.withValues(alpha: 0.5),
                     borderRadius: BorderRadius.circular(16),
