@@ -27,7 +27,7 @@ import 'package:smart_stay_ai/features/booking/domain/usecases/start_sepay_check
 import 'package:smart_stay_ai/features/booking/domain/usecases/start_vnpay_checkout.dart';
 import 'package:smart_stay_ai/features/booking/presentation/providers/booking_notifier.dart';
 import 'package:smart_stay_ai/features/booking/presentation/providers/my_bookings_notifier.dart';
-import 'package:smart_stay_ai/features/review/data/datasources/review_local_data_source.dart';
+import 'package:smart_stay_ai/features/review/data/datasources/review_remote_data_source.dart';
 import 'package:smart_stay_ai/features/review/data/repositories/review_repository_impl.dart';
 import 'package:smart_stay_ai/features/review/domain/repositories/review_repository.dart';
 import 'package:smart_stay_ai/features/review/domain/usecases/submit_review.dart';
@@ -122,8 +122,8 @@ Future<void> initDependencies() async {
   // ============================================================
 
   // ---- Feature: review (Write Review) ----
-  sl.registerLazySingleton<ReviewLocalDataSource>(
-    () => ReviewLocalDataSourceImpl(),
+  sl.registerLazySingleton<ReviewRemoteDataSource>(
+    () => ReviewRemoteDataSourceImpl(sl()),
   );
   sl.registerLazySingleton<ReviewRepository>(
     () => ReviewRepositoryImpl(sl()),
