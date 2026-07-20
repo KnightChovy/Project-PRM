@@ -2,6 +2,7 @@ import 'package:get_it/get_it.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:smart_stay_ai/core/network/dio_client.dart';
 import 'package:smart_stay_ai/core/network/token_storage.dart';
+import 'package:smart_stay_ai/core/session/app_session.dart';
 import 'package:smart_stay_ai/features/auth/data/datasources/auth_remote_data_source.dart';
 import 'package:smart_stay_ai/features/auth/data/repositories/auth_repository_impl.dart';
 import 'package:smart_stay_ai/features/auth/domain/repositories/auth_repository.dart';
@@ -33,11 +34,19 @@ import 'package:smart_stay_ai/features/review/domain/repositories/review_reposit
 import 'package:smart_stay_ai/features/review/domain/usecases/submit_review.dart';
 import 'package:smart_stay_ai/features/review/domain/usecases/get_my_reviews.dart';
 import 'package:smart_stay_ai/features/review/presentation/providers/review_notifier.dart';
-import 'package:smart_stay_ai/features/assistant/data/datasources/assistant_local_data_source.dart';
+import 'package:smart_stay_ai/features/assistant/data/datasources/assistant_remote_data_source.dart';
 import 'package:smart_stay_ai/features/assistant/data/repositories/assistant_repository_impl.dart';
 import 'package:smart_stay_ai/features/assistant/domain/repositories/assistant_repository.dart';
+import 'package:smart_stay_ai/features/assistant/domain/usecases/load_my_conversation.dart';
 import 'package:smart_stay_ai/features/assistant/domain/usecases/send_message.dart';
 import 'package:smart_stay_ai/features/assistant/presentation/providers/assistant_notifier.dart';
+import 'package:smart_stay_ai/features/profile/data/datasources/profile_remote_data_source.dart';
+import 'package:smart_stay_ai/features/profile/data/repositories/profile_repository_impl.dart';
+import 'package:smart_stay_ai/features/profile/domain/repositories/profile_repository.dart';
+import 'package:smart_stay_ai/features/profile/domain/usecases/change_my_password.dart';
+import 'package:smart_stay_ai/features/profile/domain/usecases/get_my_profile.dart';
+import 'package:smart_stay_ai/features/profile/domain/usecases/update_my_profile.dart';
+import 'package:smart_stay_ai/features/profile/presentation/providers/profile_notifier.dart';
 
 /// "Service Locator" — nơi khai báo mọi phụ thuộc của app.
 final sl = GetIt.instance;
@@ -47,7 +56,20 @@ Future<void> initDependencies() async {
   // ---- Core ----
   final prefs = await SharedPreferences.getInstance();
   sl.registerLazySingleton(() => TokenStorage(prefs));
-  sl.registerLazySingleton(() => DioClient(sl()));
+  sl.registerLazySingleton(() => AppSession(sl()));
+
+  // DioClient nhận callback làm mới phiên thay vì phụ thuộc thẳng vào
+  // AuthRepository — nếu không sẽ vòng tròn: repository cần DioClient.
+  // Closure chỉ được gọi lúc gặp 401 nên tới lúc đó repository đã sẵn sàng.
+  sl.registerLazySingleton(
+    () => DioClient(
+      sl(),
+      refreshSession: () async {
+        final result = await sl<AuthRepository>().refreshTokens();
+        return result.isRight();
+      },
+    ),
+  );
 
   // ---- Feature: auth ----
   // DataSource — gọi API thật của smartstayai-system.
@@ -71,9 +93,12 @@ Future<void> initDependencies() async {
   sl.registerLazySingleton(() => SendVerificationEmail(sl()));
   sl.registerLazySingleton(() => VerifyEmail(sl()));
 
-  // Notifier (factory: tạo mới mỗi lần dùng)
-  sl.registerFactory(
+  // Notifier — SINGLETON: đây là trạng thái phiên của cả app, không phải state
+  // riêng của một màn. Trước đây để factory nên mỗi màn `sl<AuthNotifier>()`
+  // lại dựng một instance rời, khiến `isAuthenticated` luôn sai.
+  sl.registerLazySingleton(
     () => AuthNotifier(
+      session: sl(),
       loginUser: sl(),
       registerUser: sl(),
       logoutUser: sl(),
@@ -125,20 +150,54 @@ Future<void> initDependencies() async {
   sl.registerLazySingleton<ReviewLocalDataSource>(
     () => ReviewLocalDataSourceImpl(),
   );
-  sl.registerLazySingleton<ReviewRepository>(
-    () => ReviewRepositoryImpl(sl()),
-  );
+  sl.registerLazySingleton<ReviewRepository>(() => ReviewRepositoryImpl(sl()));
   sl.registerLazySingleton(() => SubmitReview(sl()));
   sl.registerLazySingleton(() => GetMyReviews(sl()));
   sl.registerFactory(() => ReviewNotifier(sl(), sl()));
 
   // ---- Feature: assistant (AI Assistant) ----
-  sl.registerLazySingleton<AssistantLocalDataSource>(
-    () => AssistantLocalDataSourceImpl(),
+  // DataSource — chatbot Gemini thật ở /v1/conversations.
+  sl.registerLazySingleton<AssistantRemoteDataSource>(
+    () => AssistantRemoteDataSourceImpl(sl()),
   );
   sl.registerLazySingleton<AssistantRepository>(
     () => AssistantRepositoryImpl(sl()),
   );
   sl.registerLazySingleton(() => SendMessage(sl()));
-  sl.registerFactory(() => AssistantNotifier(sl()));
+  sl.registerLazySingleton(() => LoadMyConversation(sl()));
+  // Singleton: vào chat từ tab Assistant hay từ Help & Support đều phải thấy
+  // cùng một hội thoại (giữ conversationId, khỏi tạo hội thoại mới mỗi lần mở).
+  sl.registerLazySingleton(
+    () => AssistantNotifier(sendMessage: sl(), loadMyConversation: sl()),
+  );
+
+  // ---- Feature: profile ----
+  sl.registerLazySingleton<ProfileRemoteDataSource>(
+    () => ProfileRemoteDataSourceImpl(sl()),
+  );
+  sl.registerLazySingleton<ProfileRepository>(
+    () => ProfileRepositoryImpl(sl()),
+  );
+  sl.registerLazySingleton(() => GetMyProfile(sl()));
+  sl.registerLazySingleton(() => UpdateMyProfile(sl()));
+  sl.registerLazySingleton(() => ChangeMyPassword(sl()));
+  // Singleton: sửa hồ sơ ở Edit Profile thì màn Profile tự cập nhật theo.
+  sl.registerLazySingleton(
+    () => ProfileNotifier(
+      getMyProfile: sl(),
+      updateMyProfile: sl(),
+      changeMyPassword: sl(),
+    ),
+  );
+
+  // ---- Dọn dữ liệu khi đăng xuất ----
+  // Mọi notifier ở trên đều là lazy singleton, sống suốt vòng đời tiến trình.
+  // Không dọn thì người đăng nhập kế tiếp trên cùng máy sẽ thấy hồ sơ, danh
+  // sách booking và toàn bộ đoạn chat AI của người trước.
+  final session = sl<AppSession>();
+  session.addResetHandler(() => sl<ProfileNotifier>().reset());
+  session.addResetHandler(() => sl<AssistantNotifier>().reset());
+  // Chỉ MyBookingsNotifier cần dọn: BookingNotifier là factory, mỗi luồng đặt
+  // phòng dùng một instance riêng rồi bị dispose cùng màn hình.
+  session.addResetHandler(() => sl<MyBookingsNotifier>().reset());
 }

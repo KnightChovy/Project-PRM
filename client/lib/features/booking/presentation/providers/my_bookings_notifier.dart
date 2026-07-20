@@ -45,6 +45,21 @@ class MyBookingsNotifier extends ChangeNotifier {
   List<Booking> _where(Set<BookingStatus> statuses) =>
       bookings.where((b) => statuses.contains(b.status)).toList(growable: false);
 
+  /// Dọn danh sách booking khi đăng xuất.
+  ///
+  /// Notifier này là singleton sống suốt vòng đời tiến trình, nên không dọn thì
+  /// người đăng nhập kế tiếp trên cùng máy sẽ thấy chuyến đi của người trước.
+  void reset() {
+    status = RequestStatus.initial;
+    bookings = const [];
+    filter = null;
+    errorMessage = null;
+    _page = 1;
+    _totalPages = 1;
+    _isLoadingMore = false;
+    notifyListeners();
+  }
+
   /// Tải lại từ trang 1. Gọi khi mở màn hoặc khi user đổi tab trạng thái.
   Future<void> load({BookingStatus? filterBy}) async {
     filter = filterBy;

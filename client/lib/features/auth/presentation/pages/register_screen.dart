@@ -27,6 +27,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _agreed = false;
   bool _sendingCode = false;
 
+  /// Chặn bấm CREATE ACCOUNT nhiều lần.
+  ///
+  /// Server tiêu thụ mã OTP ngay ở lần gọi đầu, nên lần gọi thứ hai luôn báo
+  /// "Invalid or expired verification code" — người dùng thấy đăng ký thất bại
+  /// dù tài khoản đã được tạo thành công.
+  bool _creatingAccount = false;
+
   @override
   void dispose() {
     _nameCtrl.dispose();
@@ -102,6 +109,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
       return;
     }
 
+    if (_creatingAccount) return;
+    setState(() => _creatingAccount = true);
+
     final auth = sl<AuthNotifier>();
     await auth.register(
       name: name,
@@ -111,6 +121,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       phone: _phoneCtrl.text.trim(),
     );
     if (!mounted) return;
+    setState(() => _creatingAccount = false);
 
     if (auth.status == AuthStatus.success) {
       context.push(AppRoutes.info);
@@ -304,8 +315,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
               const SizedBox(height: 24),
               // Nút CREATE ACCOUNT (gradient gold)
               _GoldButton(
-                label: 'CREATE ACCOUNT',
-                onPressed: _agreed ? _createAccount : null,
+                label: _creatingAccount ? 'CREATING…' : 'CREATE ACCOUNT',
+                onPressed: (_agreed && !_creatingAccount)
+                    ? _createAccount
+                    : null,
               ),
               const SizedBox(height: 20),
               Center(

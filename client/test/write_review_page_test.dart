@@ -1,17 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:smart_stay_ai/core/di/injection.dart';
 import 'package:smart_stay_ai/features/review/presentation/pages/write_review_page.dart';
+
+import 'helpers/test_dependencies.dart';
 
 void main() {
   // DI thật nhưng dùng datasource mock trong RAM nên an toàn cho widget test.
-  setUp(() async {
-    await sl.reset();
-    await initDependencies();
-  });
+  setUp(setUpTestDependencies);
 
-  testWidgets('WriteReviewPage hiển thị tiêu đề, tên khách sạn và nút Submit',
-      (tester) async {
+  testWidgets('WriteReviewPage hiển thị tiêu đề, tên khách sạn và nút Submit', (
+    tester,
+  ) async {
     await tester.pumpWidget(
       const MaterialApp(
         home: WriteReviewPage(

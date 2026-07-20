@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:fpdart/fpdart.dart';
 import 'package:smart_stay_ai/core/error/failures.dart';
+import 'package:smart_stay_ai/core/session/app_session.dart';
 import 'package:smart_stay_ai/core/usecase/usecase.dart';
 import 'package:smart_stay_ai/features/auth/domain/entities/auth_tokens.dart';
 import 'package:smart_stay_ai/features/auth/domain/entities/user.dart';
@@ -31,7 +32,12 @@ class AuthNotifier extends ChangeNotifier {
   final SendVerificationEmail sendVerificationEmailUseCase;
   final VerifyEmail verifyEmailUseCase;
 
+  /// Nơi giữ trạng thái phiên chung của app: router lắng nghe nó để quyết định
+  /// chặn/cho vào màn hình, và nó cũng chịu trách nhiệm dọn dữ liệu khi logout.
+  final AppSession session;
+
   AuthNotifier({
+    required this.session,
     required this.loginUser,
     required this.registerUser,
     required this.logoutUser,
@@ -63,10 +69,11 @@ class AuthNotifier extends ChangeNotifier {
     final result = await loginUser(
       LoginParams(email: email, password: password),
     );
-    result.fold(_onFailure, (session) {
+    result.fold(_onFailure, (authSession) {
       status = AuthStatus.success;
-      user = session.user;
-      tokens = session.tokens;
+      user = authSession.user;
+      tokens = authSession.tokens;
+      session.onSignedIn();
     });
     notifyListeners();
   }
@@ -90,10 +97,11 @@ class AuthNotifier extends ChangeNotifier {
         phone: phone,
       ),
     );
-    result.fold(_onFailure, (session) {
+    result.fold(_onFailure, (authSession) {
       status = AuthStatus.success;
-      user = session.user;
-      tokens = session.tokens;
+      user = authSession.user;
+      tokens = authSession.tokens;
+      session.onSignedIn();
     });
     notifyListeners();
   }
@@ -101,11 +109,13 @@ class AuthNotifier extends ChangeNotifier {
   Future<void> logout() async {
     _setLoading();
     final result = await logoutUser(const NoParams());
-    result.fold(_onFailure, (_) {
-      status = AuthStatus.initial;
-      user = null;
-      tokens = null;
-    });
+    result.fold(_onFailure, (_) => status = AuthStatus.initial);
+    // Repository xoá token cục bộ trong `finally` dù server trả lỗi, nên phiên
+    // coi như đã kết thúc trong mọi trường hợp — phải dọn state theo, không thì
+    // người đăng nhập kế tiếp vẫn thấy dữ liệu của người trước.
+    user = null;
+    tokens = null;
+    session.onSignedOut();
     notifyListeners();
   }
 

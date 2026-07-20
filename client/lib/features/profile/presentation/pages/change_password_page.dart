@@ -1,14 +1,21 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
+import '../../../../core/di/injection.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../../../core/widgets/app_message_dialog.dart';
+import '../providers/profile_notifier.dart';
 
 /// The four password rules, in display order. value = met?
+///
+/// Chặt hơn server một chút (server chỉ đòi 8 ký tự + 1 chữ + 1 số), nên mật
+/// khẩu qua được form này thì chắc chắn qua được validation của API.
 Map<String, bool> passwordChecks(String v) => {
-      '8+ characters': v.length >= 8,
-      'One uppercase letter': RegExp(r'[A-Z]').hasMatch(v),
-      'One number': RegExp(r'[0-9]').hasMatch(v),
-      'One special character': RegExp(r'[^A-Za-z0-9]').hasMatch(v),
-    };
+  '8+ characters': v.length >= 8,
+  'One uppercase letter': RegExp(r'[A-Z]').hasMatch(v),
+  'One number': RegExp(r'[0-9]').hasMatch(v),
+  'One special character': RegExp(r'[^A-Za-z0-9]').hasMatch(v),
+};
 
 /// Validator for the form: returns an error message, or null when all rules pass.
 String? validateNewPassword(String? v) {
@@ -41,6 +48,7 @@ class ChangePasswordPage extends StatefulWidget {
 }
 
 class _ChangePasswordPageState extends State<ChangePasswordPage> {
+  final _notifier = sl<ProfileNotifier>();
   final _formKey = GlobalKey<FormState>();
   final _current = TextEditingController();
   final _next = TextEditingController();
@@ -54,77 +62,117 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
     super.dispose();
   }
 
-  void _submit() {
+  Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Password updated')),
+
+    final ok = await _notifier.changePassword(
+      currentPassword: _current.text,
+      newPassword: _next.text,
     );
-    Navigator.of(context).pop();
+    if (!mounted) return;
+
+    if (!ok) {
+      // Lỗi hay gặp: "Mật khẩu hiện tại không đúng" — server trả nguyên văn.
+      await showAppErrorDialog(
+        context,
+        title: 'Đổi mật khẩu thất bại',
+        message: _notifier.actionErrorMessage ?? 'Vui lòng thử lại.',
+      );
+      return;
+    }
+
+    await showAppMessageDialog(
+      context,
+      type: AppMessageType.success,
+      title: 'Đã đổi mật khẩu',
+      message: 'Mật khẩu mới đã được lưu.',
+    );
+    if (mounted) Navigator.of(context).pop();
   }
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
-    return Scaffold(
-      appBar: AppBar(
-        leading: const BackButton(),
-        title: const Text('Change Password'),
-      ),
-      body: SafeArea(
-        child: Form(
-          key: _formKey,
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(24, 32, 24, 24),
-            children: [
-              Text(
-                'Your password must be at least 8 characters long and include a mix of '
-                'uppercase letters, numbers, and special characters.',
-                style: t.bodyMedium?.copyWith(color: AppTheme.onSurfaceVariant),
-              ),
-              const SizedBox(height: 32),
-              _PasswordField(
-                label: 'Current Password',
-                hint: 'Enter current password',
-                controller: _current,
-                validator: (v) => (v == null || v.isEmpty) ? 'Required' : null,
-              ),
-              const SizedBox(height: 24),
-              _PasswordField(
-                label: 'New Password',
-                hint: 'Enter new password',
-                controller: _next,
-                validator: validateNewPassword,
-                onChanged: (_) => setState(() {}),
-              ),
-              const SizedBox(height: 12),
-              _StrengthMeter(value: _next.text),
-              const SizedBox(height: 12),
-              _Requirements(value: _next.text),
-              const SizedBox(height: 24),
-              _PasswordField(
-                label: 'Confirm New Password',
-                hint: 'Re-enter new password',
-                controller: _confirm,
-                validator: (v) => v != _next.text ? 'Passwords do not match' : null,
-              ),
-            ],
+    return ChangeNotifierProvider.value(
+      value: _notifier,
+      child: Scaffold(
+        appBar: AppBar(
+          leading: const BackButton(),
+          title: const Text('Change Password'),
+        ),
+        body: SafeArea(
+          child: Form(
+            key: _formKey,
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(24, 32, 24, 24),
+              children: [
+                Text(
+                  'Your password must be at least 8 characters long and include a mix of '
+                  'uppercase letters, numbers, and special characters.',
+                  style: t.bodyMedium?.copyWith(
+                    color: AppTheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 32),
+                _PasswordField(
+                  label: 'Current Password',
+                  hint: 'Enter current password',
+                  controller: _current,
+                  validator: (v) =>
+                      (v == null || v.isEmpty) ? 'Required' : null,
+                ),
+                const SizedBox(height: 24),
+                _PasswordField(
+                  label: 'New Password',
+                  hint: 'Enter new password',
+                  controller: _next,
+                  validator: validateNewPassword,
+                  onChanged: (_) => setState(() {}),
+                ),
+                const SizedBox(height: 12),
+                _StrengthMeter(value: _next.text),
+                const SizedBox(height: 12),
+                _Requirements(value: _next.text),
+                const SizedBox(height: 24),
+                _PasswordField(
+                  label: 'Confirm New Password',
+                  hint: 'Re-enter new password',
+                  controller: _confirm,
+                  validator: (v) =>
+                      v != _next.text ? 'Passwords do not match' : null,
+                ),
+              ],
+            ),
           ),
         ),
-      ),
-      bottomNavigationBar: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: SizedBox(
-            width: double.infinity,
-            child: FilledButton(
-              style: FilledButton.styleFrom(
-                backgroundColor: _gold,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        bottomNavigationBar: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: SizedBox(
+              width: double.infinity,
+              child: Consumer<ProfileNotifier>(
+                builder: (context, notifier, _) => FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: _gold,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                  ),
+                  onPressed: notifier.isSaving ? null : _submit,
+                  child: notifier.isSaving
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Text('Update Password'),
+                ),
               ),
-              onPressed: _submit,
-              child: const Text('Update Password'),
             ),
           ),
         ),
@@ -155,8 +203,10 @@ class _StrengthMeter extends StatelessWidget {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text('Password Strength',
-                style: t.labelSmall?.copyWith(color: AppTheme.onSurfaceVariant)),
+            Text(
+              'Password Strength',
+              style: t.labelSmall?.copyWith(color: AppTheme.onSurfaceVariant),
+            ),
             Text(_labels[s], style: t.labelSmall?.copyWith(color: color)),
           ],
         ),
@@ -206,13 +256,17 @@ class _Requirements extends StatelessWidget {
                   Icon(
                     e.value ? Icons.check_circle : Icons.radio_button_unchecked,
                     size: 18,
-                    color: e.value ? AppTheme.secondary : AppTheme.onSurfaceVariant,
+                    color: e.value
+                        ? AppTheme.secondary
+                        : AppTheme.onSurfaceVariant,
                   ),
                   const SizedBox(width: 8),
                   Text(
                     e.key,
                     style: t.labelLarge?.copyWith(
-                      color: e.value ? AppTheme.onSurface : AppTheme.onSurfaceVariant,
+                      color: e.value
+                          ? AppTheme.onSurface
+                          : AppTheme.onSurfaceVariant,
                     ),
                   ),
                 ],
@@ -250,13 +304,16 @@ class _PasswordFieldState extends State<_PasswordField> {
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     OutlineInputBorder border(Color c) => OutlineInputBorder(
-          borderRadius: BorderRadius.circular(32),
-          borderSide: BorderSide(color: c),
-        );
+      borderRadius: BorderRadius.circular(32),
+      borderSide: BorderSide(color: c),
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(widget.label, style: t.labelLarge?.copyWith(color: AppTheme.onSurface)),
+        Text(
+          widget.label,
+          style: t.labelLarge?.copyWith(color: AppTheme.onSurface),
+        ),
         const SizedBox(height: 8),
         TextFormField(
           controller: widget.controller,
@@ -267,10 +324,15 @@ class _PasswordFieldState extends State<_PasswordField> {
             hintText: widget.hint,
             filled: true,
             fillColor: AppTheme.surfaceContainerLowest,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 14,
+            ),
             suffixIcon: IconButton(
-              icon: Icon(_obscure ? Icons.visibility_off : Icons.visibility,
-                  color: AppTheme.onSurfaceVariant),
+              icon: Icon(
+                _obscure ? Icons.visibility_off : Icons.visibility,
+                color: AppTheme.onSurfaceVariant,
+              ),
               onPressed: () => setState(() => _obscure = !_obscure),
             ),
             enabledBorder: border(AppTheme.surfaceVariant),
