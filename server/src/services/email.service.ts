@@ -1,0 +1,392 @@
+import nodemailer from 'nodemailer';
+import config from '../config/config';
+import logger from '../config/logger';
+
+const BREVO_API_URL = 'https://api.brevo.com/v3/smtp/email';
+
+export class EmailService {
+  public transport: nodemailer.Transporter;
+
+  // Có BREVO_API_KEY thì gửi qua Brevo transactional API (HTTPS 443) — dùng cho môi trường chặn cổng
+  // SMTP như Render. Không có key thì fallback về SMTP (tiện chạy local với Gmail/Mailtrap).
+  private readonly useBrevo = Boolean(config.email.brevoApiKey);
+
+  constructor() {
+    this.transport = nodemailer.createTransport(config.email.smtp);
+    if (this.useBrevo) {
+      logger.info('Email provider: Brevo transactional API');
+      return;
+    }
+    /* istanbul ignore next */
+    if (config.env !== 'test') {
+      this.transport
+        .verify()
+        .then(() => logger.info('Connected to email server'))
+        .catch(() => logger.warn('Unable to connect to email server. Make sure you have configured the SMTP options in .env'));
+    }
+  }
+
+  // Gửi email qua Brevo REST API. Ném lỗi kèm status + body để lớp gọi (đã bọc try/catch) log rõ nguyên nhân.
+  private sendViaBrevo = async (to: string, subject: string, text: string, html?: string) => {
+    const body: Record<string, unknown> = {
+      sender: { email: config.email.from, name: 'SmartStay AI' },
+      to: [{ email: to }],
+      subject,
+      textContent: text,
+    };
+    if (html) body.htmlContent = html;
+
+    const res = await fetch(BREVO_API_URL, {
+      method: 'POST',
+      headers: {
+        'api-key': config.email.brevoApiKey as string,
+        'content-type': 'application/json',
+        accept: 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      throw new Error(`Brevo send failed (${res.status}): ${await res.text()}`);
+    }
+  };
+
+  // Premium email templates wrapping function helper
+  private getEmailWrapperHtml = (title: string, contentHtml: string) => {
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>${title}</title>
+        <style>
+          body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f6f8fa;
+            margin: 0;
+            padding: 0;
+            -webkit-font-smoothing: antialiased;
+          }
+          .container {
+            max-width: 580px;
+            margin: 40px auto;
+            background-color: #ffffff;
+            border-radius: 16px;
+            box-shadow: 0 4px 24px rgba(0, 0, 0, 0.04);
+            border: 1px solid #eaeaea;
+            overflow: hidden;
+          }
+          .header {
+            background-color: #1a1a1a;
+            padding: 32px 40px;
+            text-align: center;
+          }
+          .header h1 {
+            color: #c5a880;
+            font-size: 22px;
+            font-weight: 700;
+            letter-spacing: 4px;
+            margin: 0;
+            text-transform: uppercase;
+          }
+          .content {
+            padding: 40px;
+            color: #2e2e2e;
+            line-height: 1.6;
+          }
+          .content p {
+            font-size: 16px;
+            margin-top: 0;
+            margin-bottom: 20px;
+          }
+          .content h2 {
+            font-size: 20px;
+            font-weight: 600;
+            margin-top: 0;
+            margin-bottom: 16px;
+            color: #1a1a1a;
+          }
+          .otp-box {
+            background-color: #fcfaf6;
+            border: 1px dashed #c5a880;
+            border-radius: 12px;
+            padding: 24px;
+            text-align: center;
+            margin: 32px 0;
+          }
+          .otp-code {
+            font-size: 36px;
+            font-weight: 700;
+            letter-spacing: 8px;
+            color: #c5a880;
+            margin: 0;
+          }
+          .btn-container {
+            text-align: center;
+            margin: 36px 0;
+          }
+          .btn {
+            background-color: #c5a880;
+            color: #ffffff !important;
+            text-decoration: none;
+            padding: 14px 32px;
+            font-size: 16px;
+            font-weight: 600;
+            border-radius: 8px;
+            display: inline-block;
+            letter-spacing: 0.5px;
+            box-shadow: 0 4px 12px rgba(197, 168, 128, 0.2);
+          }
+          .footer {
+            background-color: #fafafa;
+            padding: 32px 40px;
+            text-align: center;
+            border-top: 1px solid #eaeaea;
+          }
+          .footer p {
+            font-size: 13px;
+            color: #888888;
+            margin: 0 0 8px 0;
+          }
+          .footer a {
+            color: #c5a880;
+            text-decoration: none;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>SmartStay AI</h1>
+          </div>
+          <div class="content">
+            ${contentHtml}
+          </div>
+          <div class="footer">
+            <p>© 2026 SmartStayAI Platform. All rights reserved.</p>
+            <p><a href="https://smartstay.ai/privacy">Privacy Policy</a> | <a href="https://smartstay.ai/terms">Terms of Service</a></p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+  };
+
+  /**
+   * Send an email
+   * @param {string} to
+   * @param {string} subject
+   * @param {string} text
+   * @param {string} [html]
+   * @returns {Promise<void>}
+   */
+  sendEmail = async (to: string, subject: string, text: string, html?: string) => {
+    if (this.useBrevo) {
+      await this.sendViaBrevo(to, subject, text, html);
+      return;
+    }
+    const msg = { from: config.email.from, to, subject, text, html };
+    await this.transport.sendMail(msg);
+  };
+
+  /**
+   * Send reset password email
+   * @param {string} to
+   * @param {string} token
+   * @returns {Promise<void>}
+   */
+  sendResetPasswordEmail = async (to: string, token: string) => {
+    const subject = 'Reset password';
+    const resetPasswordUrl = `${config.clientUrl}/reset-password?token=${token}`;
+
+    // In non-production, surface the reset link in logs so local testing works without reading the inbox
+    if (config.env !== 'production') {
+      logger.info(`[Reset Password] The reset link for ${to} is: ${resetPasswordUrl}`);
+    }
+
+    const text = `Dear user,
+To reset your password, click on this link: ${resetPasswordUrl}
+If you did not request any password resets, then ignore this email.`;
+
+    const html = this.getEmailWrapperHtml(
+      'Reset your password',
+      `
+        <h2>Yêu cầu khôi phục mật khẩu</h2>
+        <p>Xin chào,</p>
+        <p>Chúng tôi nhận được yêu cầu khôi phục mật khẩu cho tài khoản liên kết với địa chỉ email của bạn tại hệ thống SmartStayAI.</p>
+        <p>Vui lòng nhấp vào nút bên dưới để tiến hành đổi mật khẩu mới. Liên kết này sẽ hết hạn sau 10 phút.</p>
+        <div class="btn-container">
+          <a href="${resetPasswordUrl}" class="btn">Khôi Phục Mật Khẩu</a>
+        </div>
+        <p>If you did not request any password resets, then ignore this email.</p>
+      `
+    );
+
+    await this.sendEmail(to, subject, text, html);
+  };
+
+  /**
+   * Send verification email
+   * @param {string} to
+   * @param {string} token
+   * @returns {Promise<void>}
+   */
+  sendVerificationEmail = async (to: string, token: string) => {
+    const subject = 'Email Verification';
+    const verificationEmailUrl = `${config.clientUrl}/verify-email?token=${token}`;
+    
+    const text = `Dear user,
+To verify your email, click on this link: ${verificationEmailUrl}
+If you did not create an account, then ignore this email.`;
+
+    const html = this.getEmailWrapperHtml(
+      'Verify your email',
+      `
+        <h2>Xác thực địa chỉ Email</h2>
+        <p>Xin chào,</p>
+        <p>Cảm ơn bạn đã lựa chọn sử dụng dịch vụ của quản gia số SmartStayAI.</p>
+        <p>Vui lòng nhấp vào nút dưới đây để hoàn tất việc xác thực địa chỉ email cho tài khoản của bạn:</p>
+        <div class="btn-container">
+          <a href="${verificationEmailUrl}" class="btn">Xác Thực Tài Khoản</a>
+        </div>
+        <p>If you did not create an account, then ignore this email.</p>
+      `
+    );
+
+    await this.sendEmail(to, subject, text, html);
+  };
+
+  /**
+   * Send OTP verification email
+   * @param {string} to
+   * @param {string} otpCode
+   * @returns {Promise<void>}
+   */
+  sendOtpEmail = async (to: string, otpCode: string) => {
+    const subject = 'Verification Code - SmartStayAI';
+    
+    const text = `Dear user,
+Your verification code is: ${otpCode}
+This code is valid for 10 minutes. Do not share it with anyone.`;
+
+    const html = this.getEmailWrapperHtml(
+      'Your Verification Code',
+      `
+        <h2>Mã xác thực tài khoản</h2>
+        <p>Xin chào,</p>
+        <p>Cảm ơn bạn đã lựa chọn trải nghiệm dịch vụ quản gia cá nhân thế hệ mới của SmartStayAI.</p>
+        <p>Dưới đây là mã xác thực (OTP) kích hoạt tài khoản đăng ký của bạn:</p>
+        <div class="otp-box">
+          <div class="otp-code">${otpCode}</div>
+        </div>
+        <p>Mã xác nhận này sẽ có hiệu lực trong vòng **10 phút**. Vì sự an toàn của tài khoản, tuyệt đối không chia sẻ mã này cho bất kỳ ai.</p>
+      `
+    );
+
+    await this.sendEmail(to, subject, text, html);
+  };
+
+  /**
+   * Gửi email xác nhận booking đã thanh toán thành công (kèm mã voucher e-voucher).
+   * @param {string} to
+   * @param {object} data - thông tin booking để hiển thị
+   * @returns {Promise<void>}
+   */
+  sendBookingConfirmationEmail = async (
+    to: string,
+    data: {
+      customerName: string;
+      bookingCode: string;
+      hotelName: string;
+      roomTypeName: string;
+      checkInDate: Date;
+      checkOutDate: Date;
+      totalAmount: number;
+      voucherCode: string;
+    }
+  ) => {
+    const subject = `Xác nhận đặt phòng ${data.bookingCode} - SmartStayAI`;
+    const fmtDate = (d: Date) => d.toISOString().slice(0, 10);
+    const fmtMoney = (n: number) => `${n.toLocaleString('vi-VN')} ₫`;
+
+    const text = `Xin chao ${data.customerName},
+Dat phong ${data.bookingCode} cua ban da duoc xac nhan.
+Khach san: ${data.hotelName} - ${data.roomTypeName}
+Nhan phong: ${fmtDate(data.checkInDate)} | Tra phong: ${fmtDate(data.checkOutDate)}
+Tong tien: ${fmtMoney(data.totalAmount)}
+Ma e-voucher (xuat trinh khi nhan phong): ${data.voucherCode}`;
+
+    const html = this.getEmailWrapperHtml(
+      'Booking confirmed',
+      `
+        <h2>Đặt phòng đã được xác nhận 🎉</h2>
+        <p>Xin chào ${data.customerName},</p>
+        <p>Cảm ơn bạn đã đặt phòng và thanh toán thành công tại SmartStayAI. Dưới đây là thông tin đặt phòng của bạn:</p>
+        <p>
+          <strong>Mã đặt phòng:</strong> ${data.bookingCode}<br/>
+          <strong>Khách sạn:</strong> ${data.hotelName}<br/>
+          <strong>Loại phòng:</strong> ${data.roomTypeName}<br/>
+          <strong>Nhận phòng:</strong> ${fmtDate(data.checkInDate)}<br/>
+          <strong>Trả phòng:</strong> ${fmtDate(data.checkOutDate)}<br/>
+          <strong>Tổng tiền:</strong> ${fmtMoney(data.totalAmount)}
+        </p>
+        <p>Mã e-voucher của bạn — vui lòng xuất trình khi nhận phòng:</p>
+        <div class="otp-box">
+          <div class="otp-code">${data.voucherCode}</div>
+        </div>
+        <p>Chúc bạn có một kỳ nghỉ tuyệt vời cùng SmartStayAI!</p>
+      `
+    );
+
+    await this.sendEmail(to, subject, text, html);
+  };
+
+  /**
+   * Gửi email báo kết quả duyệt hồ sơ đăng ký khách sạn cho partner (approve / reject).
+   * @param {string} to
+   * @param {object} data
+   * @returns {Promise<void>}
+   */
+  sendPartnerVerificationResultEmail = async (
+    to: string,
+    data: { partnerName: string; hotelName: string; approved: boolean; rejectionReason?: string | null }
+  ) => {
+    const subject = data.approved
+      ? 'Hồ sơ đăng ký khách sạn đã được duyệt - SmartStayAI'
+      : 'Hồ sơ đăng ký khách sạn bị từ chối - SmartStayAI';
+
+    const text = data.approved
+      ? `Xin chao ${data.partnerName},
+Ho so dang ky khach san "${data.hotelName}" cua ban da duoc DUYET.
+Vui long dang nhap, vao Room Inventory de hoan thien thong tin phong (gia, anh, mo ta) roi bat mo ban (publish).`
+      : `Xin chao ${data.partnerName},
+Ho so dang ky khach san "${data.hotelName}" cua ban da bi TU CHOI.
+Ly do: ${data.rejectionReason || 'Khong co'}
+Ban co the chinh sua va nop lai ho so.`;
+
+    const html = data.approved
+      ? this.getEmailWrapperHtml(
+          'Registration approved',
+          `
+            <h2>Hồ sơ đã được duyệt 🎉</h2>
+            <p>Xin chào ${data.partnerName},</p>
+            <p>Hồ sơ đăng ký khách sạn <strong>${data.hotelName}</strong> của bạn đã được <strong>DUYỆT</strong>.</p>
+            <p>Vui lòng đăng nhập và vào <strong>Room Inventory</strong> để hoàn thiện thông tin phòng (giá, ảnh, mô tả), sau đó bật <strong>mở bán (publish)</strong> để khách có thể đặt phòng.</p>
+          `
+        )
+      : this.getEmailWrapperHtml(
+          'Registration rejected',
+          `
+            <h2>Hồ sơ bị từ chối</h2>
+            <p>Xin chào ${data.partnerName},</p>
+            <p>Rất tiếc, hồ sơ đăng ký khách sạn <strong>${data.hotelName}</strong> của bạn đã bị <strong>TỪ CHỐI</strong>.</p>
+            <p><strong>Lý do:</strong> ${data.rejectionReason || 'Không có'}</p>
+            <p>Bạn có thể chỉnh sửa và nộp lại hồ sơ.</p>
+          `
+        );
+
+    await this.sendEmail(to, subject, text, html);
+  };
+}
+
+export const emailService = new EmailService();
