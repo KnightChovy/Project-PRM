@@ -4,4 +4,11 @@
          to allow setting breakpoints, to provide hot reload, etc.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
+
+    <!-- Android 9 (API 28) trở lên chặn HTTP không mã hoá. Server dev chạy
+         http://10.0.2.2:5001 nên nếu không mở, mọi request đều chết với
+         "CLEARTEXT communication to 10.0.2.2 not permitted".
+
+         Chỉ mở ở bản DEBUG — bản release vẫn bắt buộc HTTPS. -->
+    <application android:usesCleartextTraffic="true" />
 </manifest>

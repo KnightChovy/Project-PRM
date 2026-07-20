@@ -1,4 +1,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- App là client REST: thiếu quyền này thì bản release không gọi được API
+         nào (bản debug vẫn chạy vì debug manifest tự khai báo, nên lỗi chỉ lộ
+         ra sau khi build release). -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+
     <application
         android:label="SmartStay AI Hotel"
         android:name="${applicationName}"

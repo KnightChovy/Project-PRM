@@ -69,7 +69,11 @@ Future<(BookingRemoteDataSourceImpl, _RecordingAdapter)> _build({
   // BASE_URL đã được nạp sẵn ở test/flutter_test_config.dart.
   SharedPreferences.setMockInitialValues({});
   final prefs = await SharedPreferences.getInstance();
-  final client = DioClient(TokenStorage(prefs));
+  // Test này chỉ soi body gửi đi, không đụng luồng làm mới phiên.
+  final client = DioClient(
+    TokenStorage(prefs),
+    refreshSession: () async => false,
+  );
   final adapter =
       _RecordingAdapter(responseBody: responseBody, statusCode: statusCode);
   client.dio.httpClientAdapter = adapter;

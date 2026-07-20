@@ -9,20 +9,20 @@ class ChatMessageModel extends ChatMessage {
     required super.createdAt,
   });
 
+  /// Map một hàng `Message` của server.
+  ///
+  /// `senderType` bên backend có 4 giá trị (`user | ai_bot | staff | system`)
+  /// nhưng khung chat chỉ vẽ 2 phía, nên mọi thứ không phải `user` đều hiển
+  /// thị như tin của trợ lý — kể cả khi nhân viên thật đang trả lời.
   factory ChatMessageModel.fromJson(Map<String, dynamic> json) =>
       ChatMessageModel(
-        id: json['id'] as String,
-        sender: (json['sender'] as String) == 'user'
+        id: json['id']?.toString() ?? '',
+        sender: json['senderType']?.toString() == 'user'
             ? MessageSender.user
             : MessageSender.assistant,
-        text: json['text'] as String,
-        createdAt: DateTime.parse(json['createdAt'] as String),
+        text: json['content']?.toString() ?? '',
+        createdAt:
+            DateTime.tryParse(json['createdAt']?.toString() ?? '') ??
+            DateTime.now(),
       );
-
-  Map<String, dynamic> toJson() => {
-        'id': id,
-        'sender': sender.name,
-        'text': text,
-        'createdAt': createdAt.toIso8601String(),
-      };
 }

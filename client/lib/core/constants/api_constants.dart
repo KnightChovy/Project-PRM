@@ -48,4 +48,13 @@ class ApiConstants {
   // ---- Review ----
   static const String reviews = '/reviews'; // POST tạo đánh giá
   static const String myReviews = '/reviews/me'; // GET đánh giá của tôi
+
+  // ---- Hồ sơ người dùng ----
+  /// GET: lấy hồ sơ (kèm `profile`) — PATCH: cập nhật hồ sơ.
+  static const String me = '/users/me';
+  static const String changePassword = '/users/me/password';
+
+  // ---- Trợ lý AI (chatbot) ----
+  static const String conversationMessages = '/conversations/messages';
+  static const String myConversation = '/conversations/me';
 }

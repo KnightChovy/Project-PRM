@@ -1,5 +1,7 @@
 import 'package:flutter/widgets.dart';
 import 'package:go_router/go_router.dart';
+import 'package:smart_stay_ai/core/di/injection.dart';
+import 'package:smart_stay_ai/core/session/app_session.dart';
 import 'package:smart_stay_ai/features/auth/presentation/pages/info_screen.dart';
 import 'package:smart_stay_ai/features/auth/presentation/pages/login_screen.dart';
 import 'package:smart_stay_ai/features/auth/presentation/pages/register_screen.dart';
@@ -56,6 +58,33 @@ class AppRoutes {
   static const cancelBooking = '/cancel-booking';
   static const writeReview = '/write-review';
   static const assistant = '/assistant';
+
+  /// Các màn khách vãng lai xem được.
+  ///
+  /// Đây là app đặt phòng: bắt đăng nhập mới cho xem khách sạn thì mất khách.
+  /// Nên cho duyệt thoải mái (trang chủ, tìm kiếm, chi tiết khách sạn/phòng,
+  /// và chat AI — backend cũng cho khách chat với hạn mức riêng), chỉ chặn ở
+  /// các hành động gắn với tài khoản.
+  ///
+  /// Danh sách TRẮNG chứ không phải danh sách đen: route mới thêm sau này mặc
+  /// định được bảo vệ. Quên khai báo thì cùng lắm bắt đăng nhập thừa, chứ
+  /// không để lọt màn hình cần bảo vệ.
+  static const publicRoutes = <String>{
+    splash,
+    onboarding,
+    login,
+    register,
+    info,
+    home,
+    hotelSearch,
+    filterSort,
+    mapView,
+    guestReviews,
+    hotelDetail,
+    rooms,
+    roomDetail,
+    assistant,
+  };
 }
 
 /// Cấu hình điều hướng tập trung. Đây là NƠI DUY NHẤT biết tất cả các page,
@@ -64,6 +93,25 @@ class AppRoutes {
 /// Dữ liệu phức tạp (Hotel, Room, BookingDraft...) được truyền qua `extra`.
 final GoRouter appRouter = GoRouter(
   initialLocation: AppRoutes.splash,
+  // Tính lại redirect mỗi khi phiên đổi (đăng nhập / đăng xuất / hết hạn).
+  refreshListenable: sl<AppSession>(),
+  redirect: (context, state) {
+    final session = sl<AppSession>();
+    final isPublic = AppRoutes.publicRoutes.contains(state.matchedLocation);
+
+    // Chưa đăng nhập mà mở màn cần tài khoản (deep link, hoặc phiên vừa bị thu
+    // hồi) → đẩy về login. Đây là lưới an toàn cuối cùng; luồng thường thì UI
+    // đã mời đăng nhập bằng bottom sheet trước khi tới được đây.
+    if (!session.isSignedIn && !isPublic) return AppRoutes.login;
+
+    // Đã đăng nhập thì không cho quay lại màn đăng nhập/đăng ký nữa.
+    if (session.isSignedIn &&
+        (state.matchedLocation == AppRoutes.login ||
+            state.matchedLocation == AppRoutes.register)) {
+      return AppRoutes.home;
+    }
+    return null;
+  },
   routes: [
     // Mở app / đổi màn chính: hiệu ứng mờ dần (fade).
     GoRoute(
@@ -92,14 +140,20 @@ final GoRouter appRouter = GoRouter(
     GoRoute(
       path: AppRoutes.hotelSearch,
       // extra (nếu có) là từ khoá tìm kiếm sẵn.
-      pageBuilder: (_, state) =>
-          _slide(state, HotelSearchPage(initialQuery: state.extra as String? ?? '')),
+      pageBuilder: (_, state) => _slide(
+        state,
+        HotelSearchPage(initialQuery: state.extra as String? ?? ''),
+      ),
     ),
     GoRoute(
       path: AppRoutes.filterSort,
       // extra là bộ lọc hiện tại; màn này pop về một HotelFilter mới.
       pageBuilder: (_, state) => _slide(
-          state, FilterSortPage(initial: state.extra as HotelFilter? ?? const HotelFilter())),
+        state,
+        FilterSortPage(
+          initial: state.extra as HotelFilter? ?? const HotelFilter(),
+        ),
+      ),
     ),
     GoRoute(
       path: AppRoutes.mapView,
@@ -170,8 +224,8 @@ final GoRouter appRouter = GoRouter(
     ),
     GoRoute(
       path: AppRoutes.writeReview,
-      pageBuilder: (_, state) => _slide(
-          state, WriteReviewPage(args: state.extra as WriteReviewArgs)),
+      pageBuilder: (_, state) =>
+          _slide(state, WriteReviewPage(args: state.extra as WriteReviewArgs)),
     ),
     GoRoute(
       path: AppRoutes.assistant,
