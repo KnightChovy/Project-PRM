@@ -3,7 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:smart_stay_ai/core/router/app_router.dart';
 import 'package:smart_stay_ai/core/theme/app_theme.dart';
 import 'package:smart_stay_ai/core/utils/date_format.dart';
-import 'package:smart_stay_ai/core/widgets/app_network_image.dart';
+import 'package:smart_stay_ai/core/utils/currency_format.dart';
 import 'package:smart_stay_ai/features/booking/domain/entities/booking.dart';
 
 /// Màn "Booking Details" — xem chi tiết một booking ĐÃ đặt (kèm nút Huỷ /
@@ -35,7 +35,7 @@ class BookingDetailViewPage extends StatelessWidget {
             _dateCards(),
             const SizedBox(height: 16),
             _infoRow('Room Type', booking.roomName),
-            _infoRow('Guests', '${booking.adults} Adults'),
+            _infoRow('Guests', '${booking.numGuests} khách'),
             const Divider(height: 28),
             _paymentSummary(),
             const SizedBox(height: 16),
@@ -54,12 +54,19 @@ class BookingDetailViewPage extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // API booking không trả ảnh khách sạn — nền thương hiệu tạm thời.
         ClipRRect(
           borderRadius: BorderRadius.circular(16),
-          child: SizedBox(
-              height: 170,
-              width: double.infinity,
-              child: AppNetworkImage(url: booking.imageUrl)),
+          child: Container(
+            height: 170,
+            width: double.infinity,
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [AppColors.goldLight, AppColors.goldDark],
+              ),
+            ),
+            child: const Icon(Icons.apartment, color: Colors.white, size: 48),
+          ),
         ),
         const SizedBox(height: 12),
         Text(booking.hotelName,
@@ -90,7 +97,7 @@ class BookingDetailViewPage extends StatelessWidget {
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Booking ID: #${booking.code}',
+            Text('Booking ID: #${booking.bookingCode}',
                 style: const TextStyle(
                     fontWeight: FontWeight.bold,
                     color: AppColors.textPrimary)),
@@ -120,11 +127,11 @@ class BookingDetailViewPage extends StatelessWidget {
       children: [
         Expanded(
             child: _dateCard(
-                'CHECK-IN', booking.checkIn, booking.checkInTime)),
+                'CHECK-IN', booking.checkInDate, booking.checkInTime)),
         const SizedBox(width: 12),
         Expanded(
             child: _dateCard(
-                'CHECK-OUT', booking.checkOut, booking.checkOutTime)),
+                'CHECK-OUT', booking.checkOutDate, booking.checkOutTime)),
       ],
     );
   }
@@ -183,12 +190,12 @@ class BookingDetailViewPage extends StatelessWidget {
                 fontWeight: FontWeight.bold,
                 color: AppColors.textPrimary)),
         const SizedBox(height: 10),
-        _priceRow('Room Rate (${booking.nights} nights)',
-            '\$${booking.subtotal.toStringAsFixed(2)}'),
-        _priceRow('Taxes & Fees', '\$${booking.taxes.toStringAsFixed(2)}'),
-        if (booking.discount > 0)
-          _priceRow('Loyalty Discount',
-              '-\$${booking.discount.toStringAsFixed(2)}'),
+        _priceRow('Room Rate (${booking.numNights} nights)',
+            formatVnd(booking.subtotal)),
+        _priceRow('Taxes', formatVnd(booking.taxAmount)),
+        _priceRow('Fees', formatVnd(booking.feeAmount)),
+        if (!booking.discountAmount.isZero)
+          _priceRow('Discount', '-${formatVnd(booking.discountAmount)}'),
         const Divider(height: 22),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -198,7 +205,7 @@ class BookingDetailViewPage extends StatelessWidget {
                     fontWeight: FontWeight.bold,
                     fontSize: 16,
                     color: AppColors.textPrimary)),
-            Text('\$${booking.total.toStringAsFixed(2)}',
+            Text(formatVnd(booking.totalAmount),
                 style: const TextStyle(
                     fontWeight: FontWeight.bold,
                     fontSize: 16,

@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:smart_stay_ai/core/router/app_router.dart';
 import 'package:smart_stay_ai/core/theme/app_theme.dart';
+import 'package:smart_stay_ai/core/utils/currency_format.dart';
 import 'package:smart_stay_ai/core/utils/date_format.dart';
 import 'package:smart_stay_ai/features/booking/domain/entities/booking.dart';
 
@@ -160,14 +161,14 @@ class BookingConfirmedPage extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _info('GUEST', booking.guestName),
                 _info('ROOM', booking.roomName),
-                _info('CHECK-IN', formatShortDate(booking.checkIn),
+                _info('CHECK-IN', formatShortDate(booking.checkInDate),
                     sub: booking.checkInTime),
-                _info('CHECK-OUT', formatShortDate(booking.checkOut),
+                _info('CHECK-OUT', formatShortDate(booking.checkOutDate),
                     sub: booking.checkOutTime),
-                _info('TOTAL GUESTS',
-                    '${booking.adults} Adults${booking.children > 0 ? ' · ${booking.children} Children' : ''}'),
+                // API chỉ lưu tổng số khách, không tách người lớn/trẻ em.
+                _info('TOTAL GUESTS', '${booking.numGuests} khách'),
+                _info('TOTAL', formatVnd(booking.totalAmount)),
               ],
             ),
           ),
@@ -183,7 +184,9 @@ class BookingConfirmedPage extends StatelessWidget {
                     borderRadius: BorderRadius.circular(16),
                   ),
                   child: QrImageView(
-                    data: booking.code,
+                    // Voucher do server phát mới là thứ lễ tân quét được;
+                    // chưa có thì tạm hiện mã booking.
+                    data: booking.voucher?.qrData ?? booking.bookingCode,
                     size: 120,
                     eyeStyle: const QrEyeStyle(
                       eyeShape: QrEyeShape.square,
@@ -207,7 +210,7 @@ class BookingConfirmedPage extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  booking.code,
+                  booking.bookingCode,
                   style: const TextStyle(
                     fontSize: 22,
                     fontWeight: FontWeight.bold,

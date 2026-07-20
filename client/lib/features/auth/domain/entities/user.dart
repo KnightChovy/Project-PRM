@@ -1,6 +1,5 @@
 import 'package:equatable/equatable.dart';
 
-/// Đối tượng nghiệp vụ "Người dùng" — thuần Dart, KHÔNG có fromJson/toJson.
 class User extends Equatable {
   final String id;
   final String name;
