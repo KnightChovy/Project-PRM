@@ -35,7 +35,7 @@ void main() {
       await tester.tap(find.text('Next'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Effortless Reservations'), findsOneWidget);
+      expect(find.text('Effortless Bookings'), findsOneWidget);
       expect(find.text('Start'), findsOneWidget);
     });
 

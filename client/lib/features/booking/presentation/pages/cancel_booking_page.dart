@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:smart_stay_ai/core/di/injection.dart';
 import 'package:smart_stay_ai/core/theme/app_theme.dart';
+import 'package:smart_stay_ai/core/utils/currency_format.dart';
 import 'package:smart_stay_ai/features/booking/domain/entities/booking.dart';
-import 'package:smart_stay_ai/features/booking/presentation/providers/booking_history_notifier.dart';
-
-/// Phí huỷ cố định (demo). Khi có backend, lấy theo chính sách từ API.
-const double _kCancellationFee = 15;
+import 'package:smart_stay_ai/features/booking/domain/entities/checkout.dart';
+import 'package:smart_stay_ai/features/booking/presentation/providers/booking_notifier.dart';
+import 'package:smart_stay_ai/features/booking/presentation/providers/my_bookings_notifier.dart';
 
 /// Màn "Cancel Booking" — xác nhận huỷ, chọn lý do, xem hoàn tiền dự kiến.
 class CancelBookingPage extends StatefulWidget {
@@ -25,35 +25,143 @@ class _CancelBookingPageState extends State<CancelBookingPage> {
   ];
   String _reason = 'Other';
   final _commentCtrl = TextEditingController();
+
+  // Thông tin tài khoản nhận hoàn tiền — chỉ dùng khi chọn hoàn về ngân hàng.
+  final _accountNumberCtrl = TextEditingController();
+  final _bankNameCtrl = TextEditingController();
+  final _accountHolderCtrl = TextEditingController();
+
+  bool _refundToBank = false;
   bool _submitting = false;
+
+  late final BookingNotifier _notifier = sl<BookingNotifier>();
 
   @override
   void dispose() {
     _commentCtrl.dispose();
+    _accountNumberCtrl.dispose();
+    _bankNameCtrl.dispose();
+    _accountHolderCtrl.dispose();
+    _notifier.dispose();
     super.dispose();
   }
 
+  /// Ghép lý do chọn sẵn với ghi chú tự nhập.
+  String get _fullReason {
+    final note = _commentCtrl.text.trim();
+    return note.isEmpty ? _reason : '$_reason — $note';
+  }
+
+  /// Sealed class buộc phải chọn đúng một nhánh; API cấm gửi `bankAccount`
+  /// khi hoàn về ví nên không thể lỡ tay gửi thừa.
+  RefundDestination? _buildDestination() {
+    if (!_refundToBank) return const WalletRefund();
+
+    final accountNumber = _accountNumberCtrl.text.trim();
+    final bankName = _bankNameCtrl.text.trim();
+    final accountHolder = _accountHolderCtrl.text.trim();
+    if (accountNumber.isEmpty || bankName.isEmpty || accountHolder.isEmpty) {
+      return null;
+    }
+    return BankRefund(
+      BankAccount(
+        accountNumber: accountNumber,
+        bankName: bankName,
+        accountHolder: accountHolder,
+      ),
+    );
+  }
+
   Future<void> _confirm() async {
+    final destination = _buildDestination();
+    if (destination == null) {
+      _toast('Vui lòng nhập đủ thông tin tài khoản nhận hoàn tiền');
+      return;
+    }
+
     setState(() => _submitting = true);
-    final ok = await sl<BookingHistoryNotifier>().cancel(widget.booking.id);
+    final cancelled = await _notifier.cancel(
+      bookingId: widget.booking.id,
+      destination: destination,
+      reason: _fullReason,
+    );
     if (!mounted) return;
     setState(() => _submitting = false);
-    if (ok) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Đã huỷ booking. Hoàn tiền đang xử lý.')),
-      );
-      Navigator.of(context).maybePop();
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Huỷ thất bại, vui lòng thử lại.')),
-      );
+
+    if (cancelled == null) {
+      _toast(_notifier.errorMessage ?? 'Huỷ thất bại, vui lòng thử lại.');
+      return;
     }
+    // Tải lại danh sách để tab My Bookings phản ánh trạng thái mới.
+    await sl<MyBookingsNotifier>().load();
+    if (!mounted) return;
+    _toast('Đã huỷ booking. Hoàn tiền đang được xử lý.');
+    Navigator.of(context).maybePop();
+  }
+
+  void _toast(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Widget _refundDestinationPicker() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Nhận tiền hoàn vào',
+            style: TextStyle(
+                fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
+        RadioListTile<bool>(
+          value: false,
+          // ignore: deprecated_member_use
+          groupValue: _refundToBank,
+          // ignore: deprecated_member_use
+          onChanged: (v) => setState(() => _refundToBank = v ?? false),
+          contentPadding: EdgeInsets.zero,
+          activeColor: AppColors.goldDark,
+          title: const Text('Ví SmartStay'),
+        ),
+        RadioListTile<bool>(
+          value: true,
+          // ignore: deprecated_member_use
+          groupValue: _refundToBank,
+          // ignore: deprecated_member_use
+          onChanged: (v) => setState(() => _refundToBank = v ?? false),
+          contentPadding: EdgeInsets.zero,
+          activeColor: AppColors.goldDark,
+          title: const Text('Tài khoản ngân hàng'),
+        ),
+        if (_refundToBank) ...[
+          _bankField(_accountNumberCtrl, 'Số tài khoản'),
+          const SizedBox(height: 8),
+          _bankField(_bankNameCtrl, 'Tên ngân hàng'),
+          const SizedBox(height: 8),
+          _bankField(_accountHolderCtrl, 'Chủ tài khoản'),
+        ],
+      ],
+    );
+  }
+
+  Widget _bankField(TextEditingController controller, String hint) {
+    return TextField(
+      controller: controller,
+      decoration: InputDecoration(
+        hintText: hint,
+        filled: true,
+        fillColor: AppColors.surface,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: AppColors.goldLight),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: AppColors.goldLight),
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final total = widget.booking.total;
-    final refund = (total - _kCancellationFee).clamp(0, double.infinity);
     return Scaffold(
       appBar: AppBar(
         centerTitle: true,
@@ -81,7 +189,9 @@ class _CancelBookingPageState extends State<CancelBookingPage> {
             const SizedBox(height: 16),
             _feeWarning(),
             const SizedBox(height: 16),
-            _summary(total.toDouble(), refund.toDouble()),
+            _summary(),
+            const SizedBox(height: 20),
+            _refundDestinationPicker(),
             const SizedBox(height: 20),
             const Text('Lý do huỷ',
                 style: TextStyle(
@@ -130,7 +240,8 @@ class _CancelBookingPageState extends State<CancelBookingPage> {
           SizedBox(width: 10),
           Expanded(
             child: Text(
-              'Huỷ bây giờ chịu phí \$15. Cân nhắc đổi ngày thay vì huỷ.',
+              'Huỷ có thể phát sinh phí theo chính sách của khách sạn. '
+              'Cân nhắc đổi ngày thay vì huỷ.',
               style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
             ),
           ),
@@ -139,7 +250,7 @@ class _CancelBookingPageState extends State<CancelBookingPage> {
     );
   }
 
-  Widget _summary(double total, double refund) {
+  Widget _summary() {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -157,12 +268,18 @@ class _CancelBookingPageState extends State<CancelBookingPage> {
                     color: AppColors.textPrimary)),
           ),
           const SizedBox(height: 10),
-          _row('Booking Total', '\$${total.toStringAsFixed(2)}'),
-          _row('Cancellation Fee', '\$${_kCancellationFee.toStringAsFixed(2)}',
-              valueColor: const Color(0xFFB23B3B)),
+          _row('Booking Total', formatVnd(widget.booking.totalAmount)),
           const Divider(height: 22),
-          _row('ESTIMATED REFUND', '\$${refund.toStringAsFixed(2)}',
-              bold: true, valueColor: const Color(0xFF3B7A57)),
+          // Số tiền hoàn do server tính theo chính sách khách sạn. Không ước
+          // tính ở client để tránh hiện một con số rồi hoàn về con số khác.
+          const Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              'Số tiền hoàn sẽ được hệ thống tính theo chính sách huỷ và '
+              'hiển thị sau khi xác nhận.',
+              style: TextStyle(color: AppColors.textSecondary, fontSize: 12),
+            ),
+          ),
         ],
       ),
     );

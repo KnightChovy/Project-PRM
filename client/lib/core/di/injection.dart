@@ -16,19 +16,18 @@ import 'package:smart_stay_ai/features/auth/domain/usecases/send_otp.dart';
 import 'package:smart_stay_ai/features/auth/domain/usecases/send_verification_email.dart';
 import 'package:smart_stay_ai/features/auth/domain/usecases/verify_email.dart';
 import 'package:smart_stay_ai/features/auth/presentation/providers/auth_notifier.dart';
-import 'package:smart_stay_ai/features/booking/data/datasources/booking_local_data_source.dart';
+import 'package:smart_stay_ai/features/booking/data/datasources/booking_remote_data_source.dart';
 import 'package:smart_stay_ai/features/booking/data/repositories/booking_repository_impl.dart';
 import 'package:smart_stay_ai/features/booking/domain/repositories/booking_repository.dart';
-import 'package:smart_stay_ai/features/booking/domain/usecases/create_booking.dart';
-import 'package:smart_stay_ai/features/booking/domain/usecases/get_my_bookings.dart';
-import 'package:smart_stay_ai/features/booking/presentation/providers/booking_notifier.dart';
-// ---- Thêm bởi BinhKhiem (feat: myBooking/detail/cancel/review/AI) ----
-import 'package:smart_stay_ai/features/booking/data/datasources/booking_history_local_data_source.dart';
-import 'package:smart_stay_ai/features/booking/data/repositories/booking_history_repository_impl.dart';
-import 'package:smart_stay_ai/features/booking/domain/repositories/booking_history_repository.dart';
 import 'package:smart_stay_ai/features/booking/domain/usecases/cancel_booking.dart';
-import 'package:smart_stay_ai/features/booking/domain/usecases/get_booking_history.dart';
-import 'package:smart_stay_ai/features/booking/presentation/providers/booking_history_notifier.dart';
+import 'package:smart_stay_ai/features/booking/domain/usecases/create_booking.dart';
+import 'package:smart_stay_ai/features/booking/domain/usecases/get_booking_detail.dart';
+import 'package:smart_stay_ai/features/booking/domain/usecases/get_my_bookings.dart';
+import 'package:smart_stay_ai/features/booking/domain/usecases/pay_with_wallet.dart';
+import 'package:smart_stay_ai/features/booking/domain/usecases/start_sepay_checkout.dart';
+import 'package:smart_stay_ai/features/booking/domain/usecases/start_vnpay_checkout.dart';
+import 'package:smart_stay_ai/features/booking/presentation/providers/booking_notifier.dart';
+import 'package:smart_stay_ai/features/booking/presentation/providers/my_bookings_notifier.dart';
 import 'package:smart_stay_ai/features/review/data/datasources/review_local_data_source.dart';
 import 'package:smart_stay_ai/features/review/data/repositories/review_repository_impl.dart';
 import 'package:smart_stay_ai/features/review/domain/repositories/review_repository.dart';
@@ -92,46 +91,40 @@ Future<void> initDependencies() async {
     ),
   );
 
-  // ---- Feature: booking ----
-  // DataSource (singleton: giữ danh sách booking trong RAM)
-  sl.registerLazySingleton(() => BookingLocalDataSource());
-
-  // Repository
+  // ---- Feature: booking (API thật) ----
+  sl.registerLazySingleton<BookingRemoteDataSource>(
+    () => BookingRemoteDataSourceImpl(sl()),
+  );
   sl.registerLazySingleton<BookingRepository>(
     () => BookingRepositoryImpl(sl()),
   );
 
-  // UseCase
   sl.registerLazySingleton(() => CreateBooking(sl()));
   sl.registerLazySingleton(() => GetMyBookings(sl()));
-
-  // Notifier (singleton: chia sẻ danh sách giữa màn xác nhận và tab My Booking)
-  sl.registerLazySingleton(
-    () => BookingNotifier(createBooking: sl(), getMyBookings: sl()),
-  );
-
-  // ============================================================
-  // Thêm bởi BinhKhiem (feat: myBooking/detail/cancel/review/AI)
-  // ============================================================
-
-  // ---- Feature: booking history (My Bookings 3 tab + Cancel) ----
-  sl.registerLazySingleton<BookingHistoryLocalDataSource>(
-    () => BookingHistoryLocalDataSourceImpl(),
-  );
-  // Truyền cả kho lịch sử (seeded + huỷ) và kho booking thật của Phat.
-  sl.registerLazySingleton<BookingHistoryRepository>(
-    () => BookingHistoryRepositoryImpl(sl(), sl()),
-  );
-  sl.registerLazySingleton(() => GetBookingHistory(sl()));
+  sl.registerLazySingleton(() => GetBookingDetail(sl()));
   sl.registerLazySingleton(() => CancelBooking(sl()));
-  // Singleton: huỷ ở màn chi tiết thì danh sách My Bookings tự cập nhật.
-  sl.registerLazySingleton(
-    () => BookingHistoryNotifier(
-      getBookingHistory: sl(),
-      cancelBooking: sl(),
+  sl.registerLazySingleton(() => StartVnpayCheckout(sl()));
+  sl.registerLazySingleton(() => StartSepayCheckout(sl()));
+  sl.registerLazySingleton(() => PayWithWallet(sl()));
+
+  // Factory: mỗi luồng đặt phòng là một phiên riêng, và notifier có Timer
+  // poll SePay cần được dispose cùng màn hình.
+  sl.registerFactory(
+    () => BookingNotifier(
       createBooking: sl(),
+      getBookingDetail: sl(),
+      startVnpayCheckout: sl(),
+      startSepayCheckout: sl(),
+      payWithWallet: sl(),
+      cancelBooking: sl(),
     ),
   );
+  // Singleton: huỷ ở màn chi tiết thì tab My Bookings tự cập nhật.
+  sl.registerLazySingleton(() => MyBookingsNotifier(sl()));
+
+  // ============================================================
+  // Thêm bởi BinhKhiem (feat: review/AI)
+  // ============================================================
 
   // ---- Feature: review (Write Review) ----
   sl.registerLazySingleton<ReviewLocalDataSource>(

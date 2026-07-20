@@ -24,3 +24,14 @@ class NetworkFailure extends Failure {
 class AuthFailure extends Failure {
   const AuthFailure({required super.message});
 }
+
+/// Request sai theo luật nghiệp vụ (400). `message` lấy nguyên từ server —
+/// đã là tiếng Việt nên Presentation hiển thị thẳng cho user.
+class ValidationFailure extends Failure {
+  const ValidationFailure({required super.message});
+}
+
+/// Không tìm thấy tài nguyên (404).
+class NotFoundFailure extends Failure {
+  const NotFoundFailure({required super.message});
+}
