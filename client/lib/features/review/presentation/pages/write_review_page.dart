@@ -9,10 +9,13 @@ import 'package:smart_stay_ai/features/review/presentation/providers/review_noti
 
 /// Tham số truyền vào màn Write Review (qua `extra` của go_router).
 class WriteReviewArgs {
+  /// Id booking đã trả phòng cần đánh giá (bắt buộc cho API POST /reviews).
+  final String bookingId;
   final String hotelName;
   final String location;
   final String imageUrl;
   const WriteReviewArgs({
+    required this.bookingId,
     required this.hotelName,
     required this.location,
     this.imageUrl = '',
@@ -47,15 +50,13 @@ class _WriteReviewPageState extends State<WriteReviewPage> {
   Future<void> _onSubmit(ReviewNotifier notifier) async {
     final ok = await notifier.submit(
       SubmitReviewParams(
-        hotelName: widget.args.hotelName,
-        location: widget.args.location,
+        bookingId: widget.args.bookingId,
         overall: _overall,
         cleanliness: _cleanliness,
         locationRating: _locationRating,
         service: _service,
         value: _value,
         comment: _commentCtrl.text.trim(),
-        isAnonymous: _anonymous,
       ),
     );
     if (!mounted) return;
@@ -76,7 +77,7 @@ class _WriteReviewPageState extends State<WriteReviewPage> {
   Widget build(BuildContext context) {
     return ChangeNotifierProvider(
       create: (_) =>
-          sl<ReviewNotifier>()..checkExisting(widget.args.hotelName),
+          sl<ReviewNotifier>()..checkExisting(widget.args.bookingId),
       child: Scaffold(
         appBar: AppBar(
           centerTitle: true,

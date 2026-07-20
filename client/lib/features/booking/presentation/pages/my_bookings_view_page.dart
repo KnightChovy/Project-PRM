@@ -270,6 +270,7 @@ class _BookingCard extends StatelessWidget {
               () => context.push(
                 AppRoutes.writeReview,
                 extra: WriteReviewArgs(
+                  bookingId: booking.id,
                   hotelName: booking.hotelName,
                   location: booking.location,
                   imageUrl: '',

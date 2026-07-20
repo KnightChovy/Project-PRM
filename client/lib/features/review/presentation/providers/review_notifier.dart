@@ -24,12 +24,13 @@ class ReviewNotifier extends ChangeNotifier with SafeNotifier {
 
   bool get isSubmitting => status == ReviewStatus.submitting;
 
-  /// Kiểm tra khách đã từng đánh giá [hotelName] chưa.
-  Future<void> checkExisting(String hotelName) async {
+  /// Kiểm tra khách đã từng đánh giá booking [bookingId] chưa
+  /// (mỗi booking chỉ 1 review theo API).
+  Future<void> checkExisting(String bookingId) async {
     final result = await getMyReviews(const NoParams());
     result.fold((_) {}, (reviews) {
       for (final r in reviews) {
-        if (r.hotelName == hotelName) {
+        if (r.bookingId == bookingId) {
           existing = r;
           break;
         }
@@ -42,7 +43,7 @@ class ReviewNotifier extends ChangeNotifier with SafeNotifier {
   Future<bool> submit(SubmitReviewParams params) async {
     status = ReviewStatus.submitting;
     errorMessage = null;
-    notifyListeners();
+    safeNotifyListeners();
 
     final result = await submitReview(params);
     return result.fold(

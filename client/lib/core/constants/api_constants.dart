@@ -45,6 +45,10 @@ class ApiConstants {
   static String walletPayment(String bookingId) =>
       '/payments/bookings/$bookingId/wallet';
 
+  // ---- Review ----
+  static const String reviews = '/reviews'; // POST tạo đánh giá
+  static const String myReviews = '/reviews/me'; // GET đánh giá của tôi
+
   // ---- Hồ sơ người dùng ----
   /// GET: lấy hồ sơ (kèm `profile`) — PATCH: cập nhật hồ sơ.
   static const String me = '/users/me';
