@@ -8,12 +8,22 @@ import 'token_storage.dart';
 class DioClient {
   final Dio dio;
 
-  DioClient(TokenStorage tokenStorage)
-      : dio = Dio(
-          BaseOptions(
-            baseUrl: ApiConstants.baseUrl,
-            connectTimeout: const Duration(seconds: 15),
-            receiveTimeout: const Duration(seconds: 15),
-          ),
-        )..interceptors.add(ApiInterceptor(tokenStorage));
+  DioClient(
+    TokenStorage tokenStorage, {
+    required Future<bool> Function() refreshSession,
+  }) : dio = Dio(
+         BaseOptions(
+           baseUrl: ApiConstants.baseUrl,
+           connectTimeout: const Duration(seconds: 15),
+           receiveTimeout: const Duration(seconds: 15),
+         ),
+       ) {
+    final interceptor = ApiInterceptor(
+      tokenStorage,
+      refreshSession: refreshSession,
+    );
+    // Interceptor cần chính Dio này để chạy lại request sau khi refresh.
+    interceptor.dio = dio;
+    dio.interceptors.add(interceptor);
+  }
 }

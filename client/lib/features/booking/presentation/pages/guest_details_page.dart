@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:smart_stay_ai/core/di/injection.dart';
 import 'package:smart_stay_ai/core/router/app_router.dart';
 import 'package:smart_stay_ai/core/theme/app_theme.dart';
+import 'package:smart_stay_ai/features/profile/domain/entities/user_profile.dart';
+import 'package:smart_stay_ai/features/profile/presentation/providers/profile_notifier.dart';
 import 'package:smart_stay_ai/features/booking/presentation/models/booking_draft.dart';
 
 /// Bước 2: thông tin khách chính. Có thể tự điền sẵn từ tài khoản.
@@ -15,10 +18,26 @@ class GuestDetailsPage extends StatefulWidget {
 }
 
 class _GuestDetailsPageState extends State<GuestDetailsPage> {
-  // Tài khoản demo dùng để "tự điền".
-  static const _accountFirst = 'Alex';
-  static const _accountLast = 'Rivera';
-  static const _accountEmail = 'alex.rivera@example.com';
+  // Thông tin "tự điền" lấy từ hồ sơ THẬT của người đang đăng nhập.
+  //
+  // Trước đây đây là 3 hằng số demo ('Alex Rivera'), nghĩa là mọi khách đặt
+  // phòng đều gửi lên tên và email của một người lạ nếu không để ý sửa lại.
+  // Server chỉ lưu một trường fullName nên tách theo khoảng trắng cuối cùng.
+  String get _accountFirst {
+    final full = _profile?.fullName.trim() ?? '';
+    if (!full.contains(' ')) return full;
+    return full.substring(0, full.lastIndexOf(' '));
+  }
+
+  String get _accountLast {
+    final full = _profile?.fullName.trim() ?? '';
+    if (!full.contains(' ')) return '';
+    return full.substring(full.lastIndexOf(' ') + 1);
+  }
+
+  String get _accountEmail => _profile?.email ?? '';
+
+  UserProfile? get _profile => sl<ProfileNotifier>().profile;
 
   static const _nationalities = [
     'Vietnam',
@@ -29,12 +48,31 @@ class _GuestDetailsPageState extends State<GuestDetailsPage> {
   ];
 
   bool _forSelf = true;
-  final _firstCtrl = TextEditingController(text: _accountFirst);
-  final _lastCtrl = TextEditingController(text: _accountLast);
-  final _emailCtrl = TextEditingController(text: _accountEmail);
+  final _firstCtrl = TextEditingController();
+  final _lastCtrl = TextEditingController();
+  final _emailCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
   String? _nationality;
   TimeOfDay? _arrival;
+
+  @override
+  void initState() {
+    super.initState();
+    _fillFromAccount();
+    // Vào thẳng luồng đặt phòng mà chưa mở tab Profile thì hồ sơ chưa được tải.
+    if (_profile == null) {
+      sl<ProfileNotifier>().load().then((_) {
+        if (mounted && _forSelf) setState(_fillFromAccount);
+      });
+    }
+  }
+
+  void _fillFromAccount() {
+    _firstCtrl.text = _accountFirst;
+    _lastCtrl.text = _accountLast;
+    _emailCtrl.text = _accountEmail;
+    _phoneCtrl.text = _profile?.phone ?? '';
+  }
 
   @override
   void dispose() {
@@ -49,9 +87,7 @@ class _GuestDetailsPageState extends State<GuestDetailsPage> {
     setState(() {
       _forSelf = v;
       if (v) {
-        _firstCtrl.text = _accountFirst;
-        _lastCtrl.text = _accountLast;
-        _emailCtrl.text = _accountEmail;
+        _fillFromAccount();
       } else {
         _firstCtrl.clear();
         _lastCtrl.clear();

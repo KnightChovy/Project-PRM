@@ -48,8 +48,10 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     // Cấp AuthNotifier cho cây widget này (lấy từ DI - service locator).
-    return ChangeNotifierProvider(
-      create: (_) => sl<AuthNotifier>(),
+    // Dùng `.value` vì AuthNotifier là singleton giữ phiên của cả app — nếu
+    // provide bằng `create:` thì provider sẽ dispose nó khi rời màn login.
+    return ChangeNotifierProvider.value(
+      value: sl<AuthNotifier>(),
       child: Scaffold(
         body: SafeArea(
           // Consumer = lắng nghe AuthNotifier và vẽ lại UI khi trạng thái đổi.

@@ -1,11 +1,24 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:smart_stay_ai/core/router/app_router.dart';
 import 'package:smart_stay_ai/features/auth/presentation/pages/login_screen.dart';
 import 'package:smart_stay_ai/features/auth/presentation/pages/register_screen.dart';
 
+import 'helpers/test_dependencies.dart';
+
 void main() {
+  // LoginScreen lấy AuthNotifier qua sl<>() ngay trong build().
+  setUpAll(setUpTestDependencies);
+
   Future<void> pumpLogin(WidgetTester tester) async {
-    await tester.pumpWidget(const MaterialApp(home: LoginScreen()));
+    await pumpWithRouter(
+      tester,
+      initialLocation: AppRoutes.login,
+      routes: {
+        AppRoutes.login: LoginScreen(),
+        AppRoutes.register: RegisterScreen(),
+      },
+    );
   }
 
   group('LoginScreen', () {

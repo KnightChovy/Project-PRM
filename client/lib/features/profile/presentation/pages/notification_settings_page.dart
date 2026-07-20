@@ -1,126 +1,173 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
+import '../../../../core/di/injection.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../../../core/widgets/app_message_dialog.dart';
+import '../providers/profile_notifier.dart';
 
-/// Notification settings — local toggles only.
-/// ponytail: persist via a settings repo/bloc when the backend exposes the prefs API.
+/// Notification settings.
+///
+/// CẢNH BÁO VỀ PHẠM VI: backend hiện KHÔNG có API cài đặt thông báo.
+/// `/v1/notifications/*` chỉ là hộp thư (list / đánh dấu đã đọc / xoá), còn
+/// preference duy nhất tồn tại trong `schema.prisma` là `marketingOptIn` trên
+/// bảng `UserProfile` — sửa được qua `PATCH /v1/users/me`.
+///
+/// Vì vậy chỉ "Promotional Offers" là được lưu thật; các toggle còn lại vẫn
+/// chỉ sống trong phiên. Muốn lưu hết thì backend phải thêm model
+/// `NotificationPreference` + endpoint tương ứng (model `PushToken` đã có sẵn
+/// trong schema nhưng chưa service nào dùng).
 class NotificationSettingsPage extends StatefulWidget {
   const NotificationSettingsPage({super.key});
 
   @override
-  State<NotificationSettingsPage> createState() => _NotificationSettingsPageState();
+  State<NotificationSettingsPage> createState() =>
+      _NotificationSettingsPageState();
 }
 
 class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
+  final _notifier = sl<ProfileNotifier>();
+
   // key -> enabled. `bookingConfirmations` is locked on (disabled in the mockup).
+  // TODO(backend): các cờ dưới đây chưa có chỗ lưu trên server.
   final Map<String, bool> _alerts = {
     'priceDrops': true,
     'aiDeals': true,
     'checkIn': true,
-    'promos': false,
     'reviews': true,
     'appUpdates': false,
   };
-  final Map<String, bool> _comms = {
-    'email': true,
-    'sms': false,
-    'push': true,
-  };
+  final Map<String, bool> _comms = {'email': true, 'sms': false, 'push': true};
+
+  @override
+  void initState() {
+    super.initState();
+    if (_notifier.profile == null) _notifier.load();
+  }
+
+  /// Toggle DUY NHẤT được ghi xuống server.
+  Future<void> _setMarketing(bool value) async {
+    final ok = await _notifier.setMarketingOptIn(value);
+    if (!mounted || ok) return;
+    await showAppErrorDialog(
+      context,
+      title: 'Không lưu được cài đặt',
+      message: _notifier.actionErrorMessage ?? 'Vui lòng thử lại.',
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
-    return Scaffold(
-      appBar: AppBar(
-        leading: const BackButton(),
-        title: const Text('Notifications'),
-      ),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(24, 16, 24, 48),
-          children: [
-            _Card(
-              children: [
-                _LockedRow(
-                  icon: Icons.confirmation_number_outlined,
-                  label: 'Booking Confirmations',
-                ),
-                _ToggleRow(
-                  icon: Icons.trending_down,
-                  label: 'Price Drops on Wishlist',
-                  value: _alerts['priceDrops']!,
-                  onChanged: (v) => setState(() => _alerts['priceDrops'] = v),
-                ),
-                _ToggleRow(
-                  icon: Icons.auto_awesome,
-                  label: 'AI Personalized Deals',
-                  value: _alerts['aiDeals']!,
-                  onChanged: (v) => setState(() => _alerts['aiDeals'] = v),
-                ),
-                _ToggleRow(
-                  icon: Icons.notification_important_outlined,
-                  label: 'Check-in Reminders',
-                  value: _alerts['checkIn']!,
-                  onChanged: (v) => setState(() => _alerts['checkIn'] = v),
-                ),
-                _ToggleRow(
-                  icon: Icons.local_offer_outlined,
-                  label: 'Promotional Offers',
-                  value: _alerts['promos']!,
-                  onChanged: (v) => setState(() => _alerts['promos'] = v),
-                ),
-                _ToggleRow(
-                  icon: Icons.rate_review_outlined,
-                  label: 'Review Reminders',
-                  value: _alerts['reviews']!,
-                  onChanged: (v) => setState(() => _alerts['reviews'] = v),
-                ),
-                _ToggleRow(
-                  icon: Icons.system_update,
-                  label: 'App Updates',
-                  value: _alerts['appUpdates']!,
-                  onChanged: (v) => setState(() => _alerts['appUpdates'] = v),
-                  last: true,
-                ),
-              ],
-            ),
-            const SizedBox(height: 32),
-            Padding(
-              padding: const EdgeInsets.only(left: 16, bottom: 12),
-              child: Text(
-                'COMMUNICATION',
-                style: t.labelSmall?.copyWith(
-                  color: AppTheme.outlineVariant,
-                  letterSpacing: 1.2,
+    return ChangeNotifierProvider.value(
+      value: _notifier,
+      child: Scaffold(
+        appBar: AppBar(
+          leading: const BackButton(),
+          title: const Text('Notifications'),
+        ),
+        body: SafeArea(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(24, 16, 24, 48),
+            children: [
+              _Card(
+                children: [
+                  _LockedRow(
+                    icon: Icons.confirmation_number_outlined,
+                    label: 'Booking Confirmations',
+                  ),
+                  _ToggleRow(
+                    icon: Icons.trending_down,
+                    label: 'Price Drops on Wishlist',
+                    value: _alerts['priceDrops']!,
+                    onChanged: (v) => setState(() => _alerts['priceDrops'] = v),
+                  ),
+                  _ToggleRow(
+                    icon: Icons.auto_awesome,
+                    label: 'AI Personalized Deals',
+                    value: _alerts['aiDeals']!,
+                    onChanged: (v) => setState(() => _alerts['aiDeals'] = v),
+                  ),
+                  _ToggleRow(
+                    icon: Icons.notification_important_outlined,
+                    label: 'Check-in Reminders',
+                    value: _alerts['checkIn']!,
+                    onChanged: (v) => setState(() => _alerts['checkIn'] = v),
+                  ),
+                  // Cờ THẬT: map thẳng vào `UserProfile.marketingOptIn`.
+                  Consumer<ProfileNotifier>(
+                    builder: (context, notifier, _) => _ToggleRow(
+                      icon: Icons.local_offer_outlined,
+                      label: 'Promotional Offers',
+                      value: notifier.profile?.marketingOptIn ?? false,
+                      onChanged: (v) {
+                        // Chặn bấm liên tục khi request trước chưa xong.
+                        if (notifier.isSaving) return;
+                        _setMarketing(v);
+                      },
+                    ),
+                  ),
+                  _ToggleRow(
+                    icon: Icons.rate_review_outlined,
+                    label: 'Review Reminders',
+                    value: _alerts['reviews']!,
+                    onChanged: (v) => setState(() => _alerts['reviews'] = v),
+                  ),
+                  _ToggleRow(
+                    icon: Icons.system_update,
+                    label: 'App Updates',
+                    value: _alerts['appUpdates']!,
+                    onChanged: (v) => setState(() => _alerts['appUpdates'] = v),
+                    last: true,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 32),
+              Padding(
+                padding: const EdgeInsets.only(left: 16, bottom: 12),
+                child: Text(
+                  'COMMUNICATION',
+                  style: t.labelSmall?.copyWith(
+                    color: AppTheme.outlineVariant,
+                    letterSpacing: 1.2,
+                  ),
                 ),
               ),
-            ),
-            _Card(
-              children: [
-                _ToggleRow(
-                  icon: Icons.mail_outline,
-                  label: 'Email Notifications',
-                  value: _comms['email']!,
-                  onChanged: (v) => setState(() => _comms['email'] = v),
-                ),
-                _ToggleRow(
-                  icon: Icons.sms_outlined,
-                  label: 'SMS Notifications',
-                  value: _comms['sms']!,
-                  onChanged: (v) => setState(() => _comms['sms'] = v),
-                ),
-                _ToggleRow(
-                  icon: Icons.notifications_active_outlined,
-                  label: 'Push Notifications',
-                  value: _comms['push']!,
-                  onChanged: (v) => setState(() => _comms['push'] = v),
-                  last: true,
-                ),
-              ],
-            ),
-            const SizedBox(height: 48),
-            const _SmartAlertsBanner(),
-          ],
+              _Card(
+                children: [
+                  _ToggleRow(
+                    icon: Icons.mail_outline,
+                    label: 'Email Notifications',
+                    value: _comms['email']!,
+                    onChanged: (v) => setState(() => _comms['email'] = v),
+                  ),
+                  _ToggleRow(
+                    icon: Icons.sms_outlined,
+                    label: 'SMS Notifications',
+                    value: _comms['sms']!,
+                    onChanged: (v) => setState(() => _comms['sms'] = v),
+                  ),
+                  _ToggleRow(
+                    icon: Icons.notifications_active_outlined,
+                    label: 'Push Notifications',
+                    value: _comms['push']!,
+                    onChanged: (v) => setState(() => _comms['push'] = v),
+                    last: true,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+              // Nói thẳng cho người dùng biết cái gì được lưu, cái gì không —
+              // tốt hơn là để họ tưởng đã lưu rồi mở lại thấy mất.
+              Text(
+                'Hiện chỉ "Promotional Offers" được lưu vào tài khoản. '
+                'Các tuỳ chọn khác sẽ trở lại mặc định khi bạn mở lại ứng dụng.',
+                style: t.labelSmall?.copyWith(color: AppTheme.onSurfaceVariant),
+              ),
+              const SizedBox(height: 48),
+              const _SmartAlertsBanner(),
+            ],
+          ),
         ),
       ),
     );
@@ -138,9 +185,15 @@ class _Card extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppTheme.surface,
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: AppTheme.surfaceContainerHigh.withValues(alpha: 0.5)),
+        border: Border.all(
+          color: AppTheme.surfaceContainerHigh.withValues(alpha: 0.5),
+        ),
         boxShadow: const [
-          BoxShadow(color: Color(0x0A1C1B1B), blurRadius: 20, offset: Offset(0, 4)),
+          BoxShadow(
+            color: Color(0x0A1C1B1B),
+            blurRadius: 20,
+            offset: Offset(0, 4),
+          ),
         ],
       ),
       child: Column(children: children),
@@ -169,14 +222,18 @@ class _ToggleRow extends StatelessWidget {
       decoration: last
           ? null
           : const BoxDecoration(
-              border: Border(bottom: BorderSide(color: AppTheme.surfaceContainerHigh)),
+              border: Border(
+                bottom: BorderSide(color: AppTheme.surfaceContainerHigh),
+              ),
             ),
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         children: [
           Icon(icon, size: 22, color: AppTheme.primary),
           const SizedBox(width: 16),
-          Expanded(child: Text(label, style: Theme.of(context).textTheme.bodyMedium)),
+          Expanded(
+            child: Text(label, style: Theme.of(context).textTheme.bodyMedium),
+          ),
           Switch(
             value: value,
             onChanged: onChanged,
@@ -199,15 +256,23 @@ class _LockedRow extends StatelessWidget {
       opacity: 0.6,
       child: Container(
         decoration: const BoxDecoration(
-          border: Border(bottom: BorderSide(color: AppTheme.surfaceContainerHigh)),
+          border: Border(
+            bottom: BorderSide(color: AppTheme.surfaceContainerHigh),
+          ),
         ),
         padding: const EdgeInsets.symmetric(vertical: 4),
         child: Row(
           children: [
             Icon(icon, size: 22, color: AppTheme.primary),
             const SizedBox(width: 16),
-            Expanded(child: Text(label, style: Theme.of(context).textTheme.bodyMedium)),
-            const Switch(value: true, onChanged: null, activeTrackColor: AppTheme.tertiaryFixedDim),
+            Expanded(
+              child: Text(label, style: Theme.of(context).textTheme.bodyMedium),
+            ),
+            const Switch(
+              value: true,
+              onChanged: null,
+              activeTrackColor: AppTheme.tertiaryFixedDim,
+            ),
           ],
         ),
       ),
@@ -226,9 +291,7 @@ class _SmartAlertsBanner extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppTheme.surfaceContainer,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: const [
-          BoxShadow(color: Color(0x668FD3D3), blurRadius: 12),
-        ],
+        boxShadow: const [BoxShadow(color: Color(0x668FD3D3), blurRadius: 12)],
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,

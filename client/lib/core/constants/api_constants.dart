@@ -44,4 +44,13 @@ class ApiConstants {
       '/payments/bookings/$bookingId/sepay';
   static String walletPayment(String bookingId) =>
       '/payments/bookings/$bookingId/wallet';
+
+  // ---- Hồ sơ người dùng ----
+  /// GET: lấy hồ sơ (kèm `profile`) — PATCH: cập nhật hồ sơ.
+  static const String me = '/users/me';
+  static const String changePassword = '/users/me/password';
+
+  // ---- Trợ lý AI (chatbot) ----
+  static const String conversationMessages = '/conversations/messages';
+  static const String myConversation = '/conversations/me';
 }
