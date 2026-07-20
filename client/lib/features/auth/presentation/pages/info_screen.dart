@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:smart_stay_ai/core/router/app_router.dart';
 import 'package:smart_stay_ai/core/theme/app_theme.dart';
 
 /// Mô tả 1 tiện ích must-have (có icon + nhãn).
@@ -38,6 +39,10 @@ class _InfoScreenState extends State<InfoScreen> {
   final Set<String> _selectedAmenities = {'High-speed Wi-Fi', 'Infinity Pool'};
   int _budgetIndex = 1;
 
+  void _completeProfile() {
+    context.go(AppRoutes.home);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -50,8 +55,10 @@ class _InfoScreenState extends State<InfoScreen> {
               child: Row(
                 children: [
                   IconButton(
-                    icon: const Icon(Icons.arrow_back,
-                        color: AppColors.textPrimary),
+                    icon: const Icon(
+                      Icons.arrow_back,
+                      color: AppColors.textPrimary,
+                    ),
                     onPressed: () => context.pop(),
                   ),
                   const Expanded(
@@ -68,7 +75,7 @@ class _InfoScreenState extends State<InfoScreen> {
                     ),
                   ),
                   TextButton(
-                    onPressed: () {},
+                    onPressed: _completeProfile,
                     child: const Text(
                       'Skip',
                       style: TextStyle(color: AppColors.textSecondary),
@@ -143,8 +150,7 @@ class _InfoScreenState extends State<InfoScreen> {
                       mainAxisSpacing: 14,
                       childAspectRatio: 1.7,
                       children: _amenities.map((a) {
-                        final selected =
-                            _selectedAmenities.contains(a.label);
+                        final selected = _selectedAmenities.contains(a.label);
                         return _AmenityCard(
                           amenity: a,
                           selected: selected,
@@ -185,11 +191,7 @@ class _InfoScreenState extends State<InfoScreen> {
                 width: double.infinity,
                 child: _GoldButton(
                   label: 'Complete Profile',
-                  onPressed: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Profile completed!')),
-                    );
-                  },
+                  onPressed: _completeProfile,
                 ),
               ),
             ),
@@ -200,14 +202,14 @@ class _InfoScreenState extends State<InfoScreen> {
   }
 
   Widget _sectionTitle(String text) => Text(
-        text,
-        style: const TextStyle(
-          fontSize: 13,
-          letterSpacing: 1.2,
-          fontWeight: FontWeight.w700,
-          color: AppColors.textSecondary,
-        ),
-      );
+    text,
+    style: const TextStyle(
+      fontSize: 13,
+      letterSpacing: 1.2,
+      fontWeight: FontWeight.w700,
+      color: AppColors.textSecondary,
+    ),
+  );
 }
 
 class _Chip extends StatelessWidget {

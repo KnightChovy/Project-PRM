@@ -12,10 +12,7 @@ class LoginUser implements UseCase<AuthSession, LoginParams> {
 
   @override
   Future<Either<Failure, AuthSession>> call(LoginParams params) {
-    return repository.login(
-      email: params.email,
-      password: params.password,
-    );
+    return repository.login(email: params.email, password: params.password);
   }
 }
 

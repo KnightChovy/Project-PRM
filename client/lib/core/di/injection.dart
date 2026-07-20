@@ -2,7 +2,6 @@ import 'package:get_it/get_it.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:smart_stay_ai/core/network/dio_client.dart';
 import 'package:smart_stay_ai/core/network/token_storage.dart';
-// import 'package:smart_stay_ai/features/auth/data/datasources/auth_mock_remote_data_source.dart';
 import 'package:smart_stay_ai/features/auth/data/datasources/auth_remote_data_source.dart';
 import 'package:smart_stay_ai/features/auth/data/repositories/auth_repository_impl.dart';
 import 'package:smart_stay_ai/features/auth/domain/repositories/auth_repository.dart';
@@ -56,10 +55,6 @@ Future<void> initDependencies() async {
   sl.registerLazySingleton<AuthRemoteDataSource>(
     () => AuthRemoteDataSourceImpl(sl()),
   );
-  // Chưa có backend? Đổi sang bản giả lập:
-  // sl.registerLazySingleton<AuthRemoteDataSource>(
-  //   () => AuthMockRemoteDataSource(),
-  // );
 
   // Repository
   sl.registerLazySingleton<AuthRepository>(

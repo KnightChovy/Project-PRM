@@ -2,18 +2,21 @@ import 'package:fpdart/fpdart.dart';
 import 'package:smart_stay_ai/core/error/failures.dart';
 import '../entities/auth_session.dart';
 import '../entities/auth_tokens.dart';
-import '../entities/user.dart';
 
 /// Hợp đồng (interface) cho việc xác thực.
 /// Domain chỉ KHAI BÁO — tầng Data sẽ hiện thực (implement).
 abstract interface class AuthRepository {
-  /// Gửi mã OTP xác minh về email (vd: trước khi đăng ký/đổi mật khẩu).
+  /// Gửi mã OTP xác minh về email — BẮT BUỘC gọi trước [register].
   Future<Either<Failure, Unit>> sendOtp({required String email});
 
-  Future<Either<Failure, User>> register({
+  /// Đăng ký — cần mã OTP 6 chữ số từ [sendOtp]. Server trả luôn user +
+  /// token nên tài khoản được đăng nhập ngay sau khi tạo.
+  Future<Either<Failure, AuthSession>> register({
     required String name,
     required String email,
     required String password,
+    required String verificationCode,
+    String? phone,
   });
 
   /// Đăng nhập — trả về user + cặp token, đồng thời lưu token vào máy.
@@ -35,9 +38,8 @@ abstract interface class AuthRepository {
     required String newPassword,
   });
 
-  Future<Either<Failure, Unit>> sendVerificationEmail({
-    required String email,
-  });
+  /// Gửi lại email xác minh cho user ĐANG ĐĂNG NHẬP (server đọc từ token).
+  Future<Either<Failure, Unit>> sendVerificationEmail();
 
   Future<Either<Failure, Unit>> verifyEmail({required String token});
 }
