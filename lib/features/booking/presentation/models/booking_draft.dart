@@ -1,3 +1,4 @@
+import 'package:smart_stay_ai/features/booking/domain/entities/booking_status.dart';
 import 'package:smart_stay_ai/features/hotel/domain/entities/hotel.dart';
 import 'package:smart_stay_ai/features/rooms/domain/entities/room.dart';
 
@@ -19,6 +20,7 @@ class BookingDraft {
   final String phone;
   final String nationality;
   final String arrivalTime;
+  final PaymentMethod paymentMethod;
 
   const BookingDraft({
     required this.hotel,
@@ -35,10 +37,15 @@ class BookingDraft {
     this.phone = '',
     this.nationality = '',
     this.arrivalTime = '',
+    this.paymentMethod = PaymentMethod.vnpay,
   });
 
   int get nights => checkOut.difference(checkIn).inDays;
+
+  /// API chỉ nhận MỘT con số khách (`numGuests`), không tách người lớn/trẻ em.
+  /// Form vẫn cho tách để giữ trải nghiệm, nhưng gửi lên là tổng.
   int get totalGuests => adults + children;
+
   String get guestName => '$firstName $lastName'.trim();
 
   double get subtotal => room.pricePerNight * nights;
@@ -61,6 +68,7 @@ class BookingDraft {
     String? phone,
     String? nationality,
     String? arrivalTime,
+    PaymentMethod? paymentMethod,
   }) {
     return BookingDraft(
       hotel: hotel,
@@ -77,6 +85,7 @@ class BookingDraft {
       phone: phone ?? this.phone,
       nationality: nationality ?? this.nationality,
       arrivalTime: arrivalTime ?? this.arrivalTime,
+      paymentMethod: paymentMethod ?? this.paymentMethod,
     );
   }
 }

@@ -1,29 +1,36 @@
-import 'package:equatable/equatable.dart';
 import 'package:fpdart/fpdart.dart';
 import 'package:smart_stay_ai/core/error/failures.dart';
 import 'package:smart_stay_ai/core/usecase/usecase.dart';
-import '../repositories/booking_history_repository.dart';
+import '../entities/checkout.dart';
+import '../entities/booking.dart';
+import '../repositories/booking_repository.dart';
 
-/// Use case: huỷ một lượt đặt phòng.
-class CancelBooking implements UseCase<Unit, CancelBookingParams> {
-  final BookingHistoryRepository repository;
+/// Huỷ booking và chọn nơi nhận tiền hoàn.
+class CancelBooking
+    implements UseCase<Booking, CancelBookingParams> {
+  final BookingRepository repository;
   const CancelBooking(this.repository);
 
   @override
-  Future<Either<Failure, Unit>> call(CancelBookingParams params) {
-    if (params.bookingId.trim().isEmpty) {
-      return Future.value(
-        const Left(ServerFailure(message: 'Thiếu mã booking cần huỷ.')),
-      );
-    }
-    return repository.cancelBooking(params.bookingId);
+  Future<Either<Failure, Booking>> call(CancelBookingParams params) {
+    return repository.cancel(
+      bookingId: params.bookingId,
+      destination: params.destination,
+      reason: params.reason,
+    );
   }
 }
 
-class CancelBookingParams extends Equatable {
+/// Không dùng Equatable vì [RefundDestination] là sealed class thường —
+/// so sánh theo tham chiếu là đủ cho params.
+class CancelBookingParams {
   final String bookingId;
-  const CancelBookingParams(this.bookingId);
+  final RefundDestination destination;
+  final String? reason;
 
-  @override
-  List<Object?> get props => [bookingId];
+  const CancelBookingParams({
+    required this.bookingId,
+    required this.destination,
+    this.reason,
+  });
 }

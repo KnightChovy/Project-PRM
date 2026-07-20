@@ -42,6 +42,9 @@ dependencies:
   go_router: ^17.3.0
   qr_flutter: ^4.1.0
   shared_preferences: ^2.5.3
+  flutter_dotenv: ^5.1.0
+  # Mở cổng thanh toán VNPay bằng trình duyệt ngoài.
+  url_launcher: ^6.3.1
 
   # Playfair Display + Be Vietnam Pro to match the SmartStay design mockups.
   google_fonts: ^6.2.1
@@ -70,6 +73,7 @@ flutter:
 
   assets:
     - screen_images/
+    - .env
 
   # To add assets to your application, add an assets section, like this:
   # assets:
