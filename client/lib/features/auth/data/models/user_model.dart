@@ -9,15 +9,16 @@ class UserModel extends User {
     required super.email,
   });
 
-  factory UserModel.fromJson(Map<String, dynamic> json) => UserModel(
-        id: json['id'] as String,
-        name: json['name'] as String,
-        email: json['email'] as String,
-      );
+  factory UserModel.fromJson(Map<String, dynamic> json) {
+    final email = json['email']?.toString() ?? '';
+    final name = json['name'] ?? json['fullName'] ?? json['username'] ?? email;
 
-  Map<String, dynamic> toJson() => {
-        'id': id,
-        'name': name,
-        'email': email,
-      };
+    return UserModel(
+      id: json['id']?.toString() ?? json['_id']?.toString() ?? '',
+      name: name.toString(),
+      email: email,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {'id': id, 'name': name, 'email': email};
 }

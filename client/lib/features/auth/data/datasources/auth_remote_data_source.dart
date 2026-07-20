@@ -2,21 +2,24 @@ import 'package:dio/dio.dart';
 import 'package:smart_stay_ai/core/constants/api_constants.dart';
 import 'package:smart_stay_ai/core/error/exceptions.dart';
 import 'package:smart_stay_ai/core/network/dio_client.dart';
+import '../models/auth_response_model.dart';
 import '../models/auth_tokens_model.dart';
-import '../models/login_response_model.dart';
-import '../models/user_model.dart';
 
 /// Nơi gọi API thật. Khi lỗi thì NÉM Exception (không trả Either).
 abstract interface class AuthRemoteDataSource {
   Future<void> sendOtp({required String email});
 
-  Future<UserModel> register({
+  /// Backend bắt buộc [verificationCode] (6 chữ số, lấy từ [sendOtp])
+  /// và trả về `{ user, tokens }` — user đã được đánh dấu verified sẵn.
+  Future<AuthResponseModel> register({
     required String name,
     required String email,
     required String password,
+    required String verificationCode,
+    String? phone,
   });
 
-  Future<LoginResponseModel> login({
+  Future<AuthResponseModel> login({
     required String email,
     required String password,
   });
@@ -32,7 +35,8 @@ abstract interface class AuthRemoteDataSource {
     required String newPassword,
   });
 
-  Future<void> sendVerificationEmail({required String email});
+  /// Không nhận email: backend lấy user từ Bearer token (route có `auth()`).
+  Future<void> sendVerificationEmail();
 
   Future<void> verifyEmail({required String token});
 }
@@ -46,29 +50,42 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
     try {
       await client.dio.post(ApiConstants.sendOtp, data: {'email': email});
     } on DioException catch (e) {
-      throw ServerException(message: e.message ?? 'Gửi OTP thất bại');
+      throw ServerException(
+        message: _messageOf(e, 'Unable to send the verification code.'),
+      );
     }
   }
 
   @override
-  Future<UserModel> register({
+  Future<AuthResponseModel> register({
     required String name,
     required String email,
     required String password,
+    required String verificationCode,
+    String? phone,
   }) async {
     try {
       final res = await client.dio.post(
         ApiConstants.register,
-        data: {'name': name, 'email': email, 'password': password},
+        data: {
+          'name': name,
+          'email': email,
+          'password': password,
+          'verificationCode': verificationCode,
+          // Field optional: chỉ gửi khi người dùng thực sự nhập.
+          if (phone != null && phone.isNotEmpty) 'phone': phone,
+        },
       );
-      return UserModel.fromJson(res.data['user'] as Map<String, dynamic>);
+      return AuthResponseModel.fromJson(res.data as Map<String, dynamic>);
     } on DioException catch (e) {
-      throw ServerException(message: e.message ?? 'Đăng ký thất bại');
+      throw ServerException(
+        message: _messageOf(e, 'Unable to create your account.'),
+      );
     }
   }
 
   @override
-  Future<LoginResponseModel> login({
+  Future<AuthResponseModel> login({
     required String email,
     required String password,
   }) async {
@@ -77,10 +94,10 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
         ApiConstants.login,
         data: {'email': email, 'password': password},
       );
-      // Giả định API trả về { "user": {...}, "tokens": { "accessToken", "refreshToken" } }.
-      return LoginResponseModel.fromJson(res.data as Map<String, dynamic>);
+      // API trả về { "user": {...}, "tokens": {...} } ở gốc response.
+      return AuthResponseModel.fromJson(res.data as Map<String, dynamic>);
     } on DioException catch (e) {
-      throw ServerException(message: e.message ?? 'Đăng nhập thất bại');
+      throw ServerException(message: _messageOf(e, 'Unable to sign you in.'));
     }
   }
 
@@ -92,7 +109,7 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
         data: {'refreshToken': refreshToken},
       );
     } on DioException catch (e) {
-      throw ServerException(message: e.message ?? 'Đăng xuất thất bại');
+      throw ServerException(message: _messageOf(e, 'Unable to sign you out.'));
     }
   }
 
@@ -103,9 +120,12 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
         ApiConstants.refreshTokens,
         data: {'refreshToken': refreshToken},
       );
+      // Endpoint này trả thẳng { access: {...}, refresh: {...} }.
       return AuthTokensModel.fromJson(res.data as Map<String, dynamic>);
     } on DioException catch (e) {
-      throw ServerException(message: e.message ?? 'Làm mới token thất bại');
+      throw ServerException(
+        message: _messageOf(e, 'Your session could not be renewed.'),
+      );
     }
   }
 
@@ -117,7 +137,9 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
         data: {'email': email},
       );
     } on DioException catch (e) {
-      throw ServerException(message: e.message ?? 'Yêu cầu quên mật khẩu thất bại');
+      throw ServerException(
+        message: _messageOf(e, 'Unable to start the password reset.'),
+      );
     }
   }
 
@@ -127,25 +149,27 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
     required String newPassword,
   }) async {
     try {
+      // token đi ở QUERY, mật khẩu mới nằm ở body dưới tên `password`.
       await client.dio.post(
         ApiConstants.resetPassword,
-        data: {'token': token, 'newPassword': newPassword},
+        queryParameters: {'token': token},
+        data: {'password': newPassword},
       );
     } on DioException catch (e) {
-      throw ServerException(message: e.message ?? 'Đặt lại mật khẩu thất bại');
+      throw ServerException(
+        message: _messageOf(e, 'Unable to reset your password.'),
+      );
     }
   }
 
   @override
-  Future<void> sendVerificationEmail({required String email}) async {
+  Future<void> sendVerificationEmail() async {
     try {
-      await client.dio.post(
-        ApiConstants.sendVerificationEmail,
-        data: {'email': email},
-      );
+      // Không có body: user được suy ra từ Bearer token do ApiInterceptor gắn.
+      await client.dio.post(ApiConstants.sendVerificationEmail);
     } on DioException catch (e) {
       throw ServerException(
-        message: e.message ?? 'Gửi email xác minh thất bại',
+        message: _messageOf(e, 'Unable to send the verification email.'),
       );
     }
   }
@@ -153,12 +177,33 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
   @override
   Future<void> verifyEmail({required String token}) async {
     try {
+      // token đi ở QUERY, không có body.
       await client.dio.post(
         ApiConstants.verifyEmail,
-        data: {'token': token},
+        queryParameters: {'token': token},
       );
     } on DioException catch (e) {
-      throw ServerException(message: e.message ?? 'Xác minh email thất bại');
+      throw ServerException(
+        message: _messageOf(e, 'Unable to verify your email.'),
+      );
     }
+  }
+
+  /// Backend trả lỗi dạng `{ code, message }` — CHỈ lấy `message` đó.
+  ///
+  /// Không dùng `e.message` của Dio vì nó lộ chi tiết kỹ thuật cho người dùng
+  /// ("Http status error [401]", URL, stack...). Khi không có message từ API
+  /// thì dùng câu mô tả sẵn của từng hành động.
+  String _messageOf(DioException e, String fallback) {
+    final data = e.response?.data;
+    if (data is Map && data['message'] is String) {
+      final message = (data['message'] as String).trim();
+      if (message.isNotEmpty) return message;
+    }
+    // Không chạm được tới server (mất mạng, timeout, sai baseUrl...).
+    if (e.response == null) {
+      return 'Cannot reach the server. Check your connection and try again.';
+    }
+    return fallback;
   }
 }

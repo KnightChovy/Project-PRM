@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
+import 'package:smart_stay_ai/core/router/app_router.dart';
 import 'package:smart_stay_ai/core/theme/app_theme.dart';
 import 'package:smart_stay_ai/features/auth/presentation/pages/info_screen.dart';
 
@@ -73,14 +75,31 @@ void main() {
       expect(containerColorOf(tester, 'Premium'), Colors.transparent);
     });
 
-    testWidgets('nhấn Complete Profile hiện SnackBar', (tester) async {
-      await pumpInfo(tester);
+    testWidgets('nhấn Complete Profile điều hướng sang màn Home', (
+      tester,
+    ) async {
+      // Màn này dùng context.go nên cần một GoRouter tối giản trong test.
+      final router = GoRouter(
+        initialLocation: AppRoutes.info,
+        routes: [
+          GoRoute(
+            path: AppRoutes.info,
+            builder: (_, _) => const InfoScreen(),
+          ),
+          GoRoute(
+            path: AppRoutes.home,
+            builder: (_, _) => const Scaffold(body: Text('HOME')),
+          ),
+        ],
+      );
+      await tester.pumpWidget(MaterialApp.router(routerConfig: router));
 
       await tester.ensureVisible(find.text('Complete Profile'));
       await tester.tap(find.text('Complete Profile'));
-      await tester.pump();
+      await tester.pumpAndSettle();
 
-      expect(find.text('Profile completed!'), findsOneWidget);
+      expect(find.text('HOME'), findsOneWidget);
+      expect(find.byType(InfoScreen), findsNothing);
     });
   });
 }

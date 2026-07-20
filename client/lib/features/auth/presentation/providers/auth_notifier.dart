@@ -58,10 +58,7 @@ class AuthNotifier extends ChangeNotifier {
 
   bool get isActionLoading => actionStatus == AuthStatus.loading;
 
-  Future<void> login({
-    required String email,
-    required String password,
-  }) async {
+  Future<void> login({required String email, required String password}) async {
     _setLoading();
     final result = await loginUser(
       LoginParams(email: email, password: password),
@@ -74,18 +71,29 @@ class AuthNotifier extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// [verificationCode]: mã OTP 6 chữ số lấy từ [sendOtp].
+  /// Server trả kèm token nên đăng ký xong là đã đăng nhập.
   Future<void> register({
     required String name,
     required String email,
     required String password,
+    required String verificationCode,
+    String? phone,
   }) async {
     _setLoading();
     final result = await registerUser(
-      RegisterParams(name: name, email: email, password: password),
+      RegisterParams(
+        name: name,
+        email: email,
+        password: password,
+        verificationCode: verificationCode,
+        phone: phone,
+      ),
     );
-    result.fold(_onFailure, (u) {
+    result.fold(_onFailure, (session) {
       status = AuthStatus.success;
-      user = u;
+      user = session.user;
+      tokens = session.tokens;
     });
     notifyListeners();
   }
@@ -112,9 +120,7 @@ class AuthNotifier extends ChangeNotifier {
   }
 
   Future<void> forgotPassword({required String email}) async {
-    await _runAction(
-      forgotPasswordUseCase(ForgotPasswordParams(email: email)),
-    );
+    await _runAction(forgotPasswordUseCase(ForgotPasswordParams(email: email)));
   }
 
   Future<void> resetPassword({
@@ -128,10 +134,9 @@ class AuthNotifier extends ChangeNotifier {
     );
   }
 
-  Future<void> sendVerificationEmail({required String email}) async {
-    await _runAction(
-      sendVerificationEmailUseCase(SendVerificationEmailParams(email: email)),
-    );
+  /// Chỉ gọi được khi đã đăng nhập — server lấy user từ access token.
+  Future<void> sendVerificationEmail() async {
+    await _runAction(sendVerificationEmailUseCase(const NoParams()));
   }
 
   Future<void> verifyEmail({required String token}) async {
@@ -144,13 +149,10 @@ class AuthNotifier extends ChangeNotifier {
     notifyListeners();
 
     final result = await future;
-    result.fold(
-      (failure) {
-        actionStatus = AuthStatus.error;
-        actionErrorMessage = failure.message;
-      },
-      (_) => actionStatus = AuthStatus.success,
-    );
+    result.fold((failure) {
+      actionStatus = AuthStatus.error;
+      actionErrorMessage = failure.message;
+    }, (_) => actionStatus = AuthStatus.success);
     notifyListeners();
   }
 

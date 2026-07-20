@@ -4,7 +4,6 @@ import 'package:smart_stay_ai/core/error/failures.dart';
 import 'package:smart_stay_ai/core/network/token_storage.dart';
 import '../../domain/entities/auth_session.dart';
 import '../../domain/entities/auth_tokens.dart';
-import '../../domain/entities/user.dart';
 import '../../domain/repositories/auth_repository.dart';
 import '../datasources/auth_remote_data_source.dart';
 
@@ -26,18 +25,27 @@ class AuthRepositoryImpl implements AuthRepository {
   }
 
   @override
-  Future<Either<Failure, User>> register({
+  Future<Either<Failure, AuthSession>> register({
     required String name,
     required String email,
     required String password,
+    required String verificationCode,
+    String? phone,
   }) async {
     try {
-      final user = await remote.register(
+      final response = await remote.register(
         name: name,
         email: email,
         password: password,
+        verificationCode: verificationCode,
+        phone: phone,
       );
-      return Right(user);
+      // Register trả sẵn token -> lưu luôn để user vào thẳng app, khỏi login lại.
+      await tokenStorage.saveTokens(
+        accessToken: response.tokens.accessToken,
+        refreshToken: response.tokens.refreshToken,
+      );
+      return Right(AuthSession(user: response.user, tokens: response.tokens));
     } on ServerException catch (e) {
       return Left(ServerFailure(message: e.message));
     }
@@ -80,7 +88,7 @@ class AuthRepositoryImpl implements AuthRepository {
   Future<Either<Failure, AuthTokens>> refreshTokens() async {
     final refreshToken = tokenStorage.refreshToken;
     if (refreshToken == null) {
-      return const Left(AuthFailure(message: 'Chưa đăng nhập'));
+      return const Left(AuthFailure(message: 'You are not signed in.'));
     }
     try {
       final tokens = await remote.refreshTokens(refreshToken: refreshToken);
@@ -95,9 +103,7 @@ class AuthRepositoryImpl implements AuthRepository {
   }
 
   @override
-  Future<Either<Failure, Unit>> forgotPassword({
-    required String email,
-  }) async {
+  Future<Either<Failure, Unit>> forgotPassword({required String email}) async {
     try {
       await remote.forgotPassword(email: email);
       return const Right(unit);
@@ -120,11 +126,9 @@ class AuthRepositoryImpl implements AuthRepository {
   }
 
   @override
-  Future<Either<Failure, Unit>> sendVerificationEmail({
-    required String email,
-  }) async {
+  Future<Either<Failure, Unit>> sendVerificationEmail() async {
     try {
-      await remote.sendVerificationEmail(email: email);
+      await remote.sendVerificationEmail();
       return const Right(unit);
     } on ServerException catch (e) {
       return Left(ServerFailure(message: e.message));
