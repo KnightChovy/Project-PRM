@@ -1,0 +1,164 @@
+import 'dotenv/config';
+import Joi from 'joi';
+
+const envVarsSchema = Joi.object()
+  .keys({
+    NODE_ENV: Joi.string().valid('production', 'development', 'test').required(),
+    PORT: Joi.number().default(3000),
+    PUBLIC_URL: Joi.string()
+      .uri()
+      .allow('')
+      .default('')
+      .description('Base URL công khai của service (vd https://xxx.onrender.com) — dùng cho server URL của Swagger khi deploy'),
+    MONGODB_URL: Joi.string().description('Mongo DB url (optional, kept for legacy error typing)'),
+    DATABASE_URL: Joi.string().required().description('PostgreSQL database URL'),
+    JWT_SECRET: Joi.string().required().description('JWT secret key'),
+    BCRYPT_ROUNDS: Joi.number().default(12).description('bcrypt salt rounds for password hashing'),
+    JWT_ACCESS_EXPIRATION_MINUTES: Joi.number().default(30).description('minutes after which access tokens expire'),
+    JWT_REFRESH_EXPIRATION_DAYS: Joi.number().default(30).description('days after which refresh tokens expire'),
+    JWT_RESET_PASSWORD_EXPIRATION_MINUTES: Joi.number()
+      .default(10)
+      .description('minutes after which reset password token expires'),
+    JWT_VERIFY_EMAIL_EXPIRATION_MINUTES: Joi.number()
+      .default(10)
+      .description('minutes after which verify email token expires'),
+    SMTP_HOST: Joi.string().description('server that will send the emails'),
+    SMTP_PORT: Joi.number().description('port to connect to the email server'),
+    SMTP_USERNAME: Joi.string().description('username for email server'),
+    SMTP_PASSWORD: Joi.string().description('password for email server'),
+    BREVO_API_KEY: Joi.string()
+      .allow('')
+      .description('Brevo (Sendinblue) transactional email API key — gửi email qua HTTPS (dùng khi môi trường chặn SMTP, vd Render). Có key thì ưu tiên dùng Brevo'),
+    EMAIL_FROM: Joi.string().description('the from field in the emails sent by the app'),
+    CLIENT_URL: Joi.string().required().description('Frontend URL used to build links in emails'),
+    CLOUDINARY_CLOUD_NAME: Joi.string().required().description('Cloudinary cloud name'),
+    CLOUDINARY_API_KEY: Joi.string().required().description('Cloudinary API key'),
+    CLOUDINARY_API_SECRET: Joi.string().required().description('Cloudinary API secret'),
+    PARTNER_DEFAULT_COMMISSION_RATE: Joi.number()
+      .default(15)
+      .description('default commission rate (%) applied to a newly registered hotel partner'),
+    PAYOUT_ENCRYPTION_KEY: Joi.string()
+      .required()
+      .description('base64-encoded 32-byte key (AES-256-GCM) to encrypt sensitive payout data'),
+    VNP_TMN_CODE: Joi.string().allow('').default('').description('VNPay merchant terminal code (TmnCode)'),
+    VNP_HASH_SECRET: Joi.string().allow('').default('').description('VNPay HMAC-SHA512 secret'),
+    VNP_URL: Joi.string()
+      .default('https://sandbox.vnpayment.vn/paymentv2/vpcpay.html')
+      .description('VNPay payment gateway URL'),
+    VNP_API_URL: Joi.string()
+      .default('https://sandbox.vnpayment.vn/merchant_webapi/api/transaction')
+      .description('VNPay merchant API URL (query/refund)'),
+    VNP_RETURN_URL: Joi.string()
+      .default('http://localhost:5000/v1/payments/vnpay/return')
+      .description('Backend URL VNPay redirects the browser back to after payment'),
+    SEPAY_WEBHOOK_API_KEY: Joi.string()
+      .allow('')
+      .default('')
+      .description('SePay webhook API key — dùng xác thực header "Authorization: Apikey <key>" khi SePay gọi về'),
+    SEPAY_ACCOUNT_NUMBER: Joi.string()
+      .allow('')
+      .default('')
+      .description('Số tài khoản ngân hàng nhận tiền (tài khoản đã liên kết SePay)'),
+    SEPAY_BANK_CODE: Joi.string()
+      .allow('')
+      .default('')
+      .description('Mã ngân hàng dựng QR, theo danh sách https://qr.sepay.vn/banks.json (vd: Vietcombank, MBBank, ACB)'),
+    AI_PROVIDER: Joi.string().valid('gemini', 'claude').default('gemini').description('Nhà cung cấp LLM cho chatbot'),
+    GEMINI_API_KEY: Joi.string().allow('').default('').description('Google Gemini API key (free tier)'),
+    CRON_SECRET: Joi.string()
+      .allow('')
+      .default('')
+      .description('Bí mật cho cron ngoài gọi /internal/jobs (header x-cron-secret)'),
+    SCHEDULER_ENABLED: Joi.boolean()
+      .default(true)
+      .description('Bật scheduler chạy nền trong app (release-holds / sweep-no-shows / settle-commissions). Đặt false nếu chạy nhiều instance và muốn tách job ra riêng'),
+  })
+  .unknown();
+
+const { value: envVars, error } = envVarsSchema.prefs({ errors: { label: 'key' } }).validate(process.env);
+
+if (error) {
+  throw new Error(`Config validation error: ${error.message}`);
+}
+
+const config = {
+  env: envVars.NODE_ENV,
+  port: envVars.PORT,
+  // Base URL công khai (rỗng ở local → Swagger fallback về http://localhost:PORT)
+  publicUrl: envVars.PUBLIC_URL,
+  clientUrl: envVars.CLIENT_URL,
+  mongoose: {
+    url: envVars.MONGODB_URL ? envVars.MONGODB_URL + (envVars.NODE_ENV === 'test' ? '-test' : '') : undefined,
+    options: {
+      useCreateIndex: true,
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
+    },
+  },
+  prisma: {
+    url: envVars.DATABASE_URL,
+  },
+  jwt: {
+    secret: envVars.JWT_SECRET,
+    accessExpirationMinutes: envVars.JWT_ACCESS_EXPIRATION_MINUTES,
+    refreshExpirationDays: envVars.JWT_REFRESH_EXPIRATION_DAYS,
+    resetPasswordExpirationMinutes: envVars.JWT_RESET_PASSWORD_EXPIRATION_MINUTES,
+    verifyEmailExpirationMinutes: envVars.JWT_VERIFY_EMAIL_EXPIRATION_MINUTES,
+  },
+  bcrypt: {
+    rounds: envVars.BCRYPT_ROUNDS,
+  },
+  email: {
+    smtp: {
+      host: envVars.SMTP_HOST,
+      port: envVars.SMTP_PORT,
+      auth: {
+        user: envVars.SMTP_USERNAME,
+        pass: envVars.SMTP_PASSWORD,
+      },
+    },
+    brevoApiKey: envVars.BREVO_API_KEY,
+    from: envVars.EMAIL_FROM,
+  },
+  cloudinary: {
+    cloudName: envVars.CLOUDINARY_CLOUD_NAME,
+    apiKey: envVars.CLOUDINARY_API_KEY,
+    apiSecret: envVars.CLOUDINARY_API_SECRET,
+  },
+  partner: {
+    // Tỉ lệ hoa hồng (%) mặc định gán cho đối tác mới khi họ nộp hồ sơ đăng ký
+    defaultCommissionRate: envVars.PARTNER_DEFAULT_COMMISSION_RATE,
+  },
+  security: {
+    // Key mã hoá dữ liệu nhạy cảm (số tài khoản nhận tiền của đối tác)
+    payoutEncryptionKey: envVars.PAYOUT_ENCRYPTION_KEY,
+  },
+  ai: {
+    // Cần gạt của "công tắc": chọn nhà cung cấp LLM (gemini lúc dev, claude lúc demo)
+    provider: envVars.AI_PROVIDER,
+    geminiApiKey: envVars.GEMINI_API_KEY,
+  },
+  scheduler: {
+    // Scheduler chạy nền trong chính app. Tắt ở môi trường test để job không chạy xen vào test.
+    enabled: envVars.SCHEDULER_ENABLED && envVars.NODE_ENV !== 'test',
+  },
+  cron: {
+    // Bí mật để cron ngoài (cron-job.org) chứng minh "tôi là cron" qua header x-cron-secret.
+    // Rỗng = chưa cấu hình ⇒ middleware sẽ CHẶN hết (an toàn mặc định).
+    secret: envVars.CRON_SECRET,
+  },
+  vnpay: {
+    tmnCode: envVars.VNP_TMN_CODE,
+    hashSecret: envVars.VNP_HASH_SECRET,
+    url: envVars.VNP_URL,
+    apiUrl: envVars.VNP_API_URL,
+    returnUrl: envVars.VNP_RETURN_URL,
+  },
+  sepay: {
+    webhookApiKey: envVars.SEPAY_WEBHOOK_API_KEY,
+    accountNumber: envVars.SEPAY_ACCOUNT_NUMBER,
+    bankCode: envVars.SEPAY_BANK_CODE,
+  },
+};
+
+export default config;

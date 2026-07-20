@@ -1,0 +1,5150 @@
+tags:
+  - name: Auth
+    description: Authentication
+  - name: Users
+    description: User management and retrieval
+  - name: Uploads
+    description: File upload (Cloudinary)
+  - name: HotelPartners
+    description: Hotel partner registration and verification
+  - name: Hotels
+    description: Public hotel & room search
+  - name: Bookings
+    description: Booking creation, cancellation and listing
+  - name: Reviews
+    description: Guest reviews — submit after checkout, public listing per hotel
+  - name: Payments
+    description: VNPay payment — create payment URL and handle gateway callbacks
+  - name: HotelManagement
+    description: Partner management of room types, rooms, pricing rules and staff (hotel owner or manageHotels right)
+  - name: Revenue
+    description: Per-hotel revenue report & wallet (balances + transaction ledger) for the hotel owner/manager
+  - name: Amenities
+    description: Amenity catalog (list public, create by partner/admin)
+  - name: Chatbot
+    description: >
+      AI chatbot (LLM provider is swappable via the AiProvider switch). Two modes on the same endpoint:
+      send hotelId for a PER-HOTEL concierge (search/book/cancel within that hotel), or omit hotelId for
+      the PLATFORM-WIDE assistant (advisory only — finds & recommends hotels across the marketplace).
+  - name: Internal
+    description: Endpoints for an external scheduler (cron). Protected by the x-cron-secret header, not user JWT.
+  - name: Admin
+    description: Platform-wide admin dashboard & oversight (admin / platform_manager)
+  - name: PlatformManager
+    description: Platform analytics & hotel performance scoring (platform_manager / admin)
+  - name: Notifications
+    description: In-app notifications for the authenticated user (list, unread badge, mark read, delete)
+
+paths:
+  /conversations/messages:
+    post:
+      summary: Send a message to the chatbot (per-hotel or platform-wide)
+      description: >
+        Send one message to the AI chatbot. Authentication is OPTIONAL. Two modes selected by hotelId:
+        WITH hotelId → per-hotel concierge; WITHOUT hotelId → platform-wide assistant (advisory only:
+        it finds & recommends hotels across the marketplace via search_hotels, and does NOT book, cancel
+        or look up orders — it invites the guest to open a hotel's page for that). In per-hotel mode,
+        anonymous visitors get a read-only assistant (FAQs, room/price search, hotel info) while
+        authenticated guests additionally get personal actions — look up their own bookings and
+        place/cancel bookings via a two-step confirm-gate (the bot proposes a summary, then acts only
+        after explicit agreement). If conversationId is omitted a new conversation is created; otherwise
+        the message continues that conversation (full history replayed to the LLM each turn). An anonymous
+        conversation cannot be resumed with a token and vice versa, and a platform conversation is separate
+        from any hotel conversation. Returns the bot reply and the conversationId to reuse next turn.
+      tags: [Chatbot]
+      security:
+        - bearerAuth: []
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - message
+              properties:
+                hotelId:
+                  type: string
+                  format: uuid
+                  description: Omit for the platform-wide assistant; send it for a specific hotel's concierge
+                conversationId:
+                  type: string
+                  format: uuid
+                  description: Omit to start a new conversation
+                message:
+                  type: string
+                  maxLength: 2000
+              example:
+                message: Tìm giúp mình khách sạn ở Đà Nẵng cho 2 người cuối tuần này
+      responses:
+        "201":
+          description: >
+            Bot reply. handoff is a BE-computed flag: true when a human is handling the conversation
+            (escalated, or active with an assigned staff) — DO NOT infer it from status alone, because
+            status returns to "active" once staff reply while the bot must stay silent. When handoff is
+            true, reply is a "please wait for staff" notice and the bot did not run.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  conversationId:
+                    type: string
+                    format: uuid
+                  reply:
+                    type: string
+                  status:
+                    type: string
+                    enum: [active, escalated, resolved, closed]
+                  handoff:
+                    type: boolean
+                    description: true = a human is handling this conversation (bot stays silent)
+        "401":
+          description: A token was sent but is invalid/expired (refresh and retry). No token = anonymous, still allowed.
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "429":
+          description: Rate limit or daily/conversation message quota exceeded
+
+  /conversations/mine:
+    get:
+      summary: List the caller's conversations (one row per hotel / platform)
+      description: >
+        Sidebar of "which hotels have I chatted with" for an AUTHENTICATED guest (Messenger-style).
+        One row per hotelId (most recent), sorted by recency; capped at 30. hotel is null for a
+        platform-wide conversation. Anonymous visitors get [] (they have no durable history). Each row
+        carries the BE-computed handoff flag.
+      tags: [Chatbot]
+      security:
+        - bearerAuth: []
+        - {}
+      responses:
+        "200":
+          description: Conversation list (empty array for anonymous callers)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: string, format: uuid }
+                    hotelId: { type: string, format: uuid, nullable: true }
+                    status: { type: string }
+                    handoff: { type: boolean }
+                    lastMessage: { type: string, nullable: true }
+                    lastMessageSender: { type: string, nullable: true, description: "user | ai_bot | staff | system" }
+                    lastMessageAt: { type: string, format: date-time, nullable: true }
+                    hotel:
+                      type: object
+                      nullable: true
+                      description: null = platform-wide conversation
+                      properties:
+                        id: { type: string, format: uuid }
+                        name: { type: string }
+                        city: { type: string }
+                        imageUrl: { type: string, nullable: true }
+        "401":
+          description: A token was sent but is invalid/expired
+
+  /conversations/me:
+    get:
+      summary: Restore the caller's open conversation after a refresh
+      description: >
+        Returns the caller's most recent conversation for the given hotelId (omit hotelId for the
+        platform-wide conversation) plus the last 50 messages (oldest→newest) and the handoff flag.
+        Returns null if none exists or the caller is anonymous. Without this, conversationId lives only
+        in FE state, so a refresh loses it and the guest can no longer re-join the socket room to receive
+        the staff's replies.
+      tags: [Chatbot]
+      security:
+        - bearerAuth: []
+        - {}
+      parameters:
+        - in: query
+          name: hotelId
+          required: false
+          schema: { type: string, format: uuid }
+          description: Omit for the platform-wide conversation
+      responses:
+        "200":
+          description: The conversation with messages + handoff, or null
+          content:
+            application/json:
+              schema:
+                type: object
+                nullable: true
+        "401":
+          description: A token was sent but is invalid/expired
+
+  /conversations/{conversationId}/mode:
+    patch:
+      summary: Toggle a conversation between AI and human (guest-driven)
+      description: >
+        The guest flips their OWN conversation between the AI bot and a human agent. mode=human escalates
+        (status→escalated, appends a "[Hệ thống] <reason>" system message, notifies the hotel's staff
+        mailbox in real time) — rejected with 400 for a platform-wide conversation (no hotel = no staff to
+        handle it). mode=ai returns it to the bot (status→active, clears assignedTo, appends a system note)
+        — unlike staff Resolve, it does NOT mark the conversation resolved. Flipping to the current mode is
+        a no-op (safe to press repeatedly). The conversation is never recreated, so history is preserved.
+        404 if the conversation is not the caller's.
+      tags: [Chatbot]
+      security:
+        - bearerAuth: []
+        - {}
+      parameters:
+        - in: path
+          name: conversationId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mode]
+              properties:
+                mode: { type: string, enum: [ai, human] }
+                reason: { type: string, maxLength: 500, description: "Used when mode=human" }
+              example:
+                mode: human
+                reason: Khách yêu cầu gặp nhân viên
+      responses:
+        "200":
+          description: Updated conversation record + handoff flag
+        "400":
+          description: mode=human on a platform-wide conversation (no hotel/staff)
+        "401":
+          description: A token was sent but is invalid/expired
+        "404":
+          $ref: '#/components/responses/NotFound'
+
+  /conversations/messages/stream:
+    post:
+      summary: Send a message and stream the reply (SSE)
+      description: >
+        Same body and OPTIONAL-auth behaviour as /conversations/messages (omit hotelId = platform-wide
+        advisory assistant, send hotelId = per-hotel concierge; anonymous = read-only, authenticated =
+        personal booking actions in per-hotel mode), but the reply is streamed token-by-token over
+        Server-Sent Events. Emits a "meta" event { conversationId, status, handoff } (status/handoff here
+        may be STALE — the bot can escalate mid-turn), then "chunk" events { text }, then a "done" event
+        { status, handoff } carrying the AUTHORITATIVE post-turn state — trust this one. The full reply is
+        saved to the DB after streaming ends.
+      tags: [Chatbot]
+      security:
+        - bearerAuth: []
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - message
+              properties:
+                hotelId:
+                  type: string
+                  format: uuid
+                  description: Omit for the platform-wide assistant; send it for a specific hotel's concierge
+                conversationId:
+                  type: string
+                  format: uuid
+                message:
+                  type: string
+                  maxLength: 2000
+      responses:
+        "200":
+          description: SSE stream (text/event-stream)
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "429":
+          description: Rate limit or daily/conversation message quota exceeded
+
+  /admin/overview:
+    get:
+      summary: Platform overview dashboard (admin)
+      description: >
+        Admin/platform_manager (viewPlatformStats) gets platform metrics computed live in one
+        consistent transaction: user counts by role, hotels listed/unlisted, bookings by status, and
+        revenue (GMV, platform commission pending/settled, total refunded). Money values are strings.
+      tags: [Admin]
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Aggregated platform metrics
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/revenue:
+    get:
+      summary: Platform revenue report (admin/platform_manager)
+      description: >
+        viewPlatformStats. Platform-wide revenue over [from, to]: GMV (total of settled bookings —
+        confirmed/checked_in/checked_out), commission pending/settled, total refunded, and
+        netPlatformRevenue (= pending + settled commission — the platform's actual earnings).
+        Includes a day/month time series and, when BOTH from and to are given, a % comparison against
+        the immediately preceding period of equal length. All money values are strings.
+      tags: [Admin]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: from
+          schema: { type: string, format: date }
+          description: Inclusive start date (YYYY-MM-DD). Omit for all-time (comparison then null).
+        - in: query
+          name: to
+          schema: { type: string, format: date }
+          description: Inclusive end date (YYYY-MM-DD). Omit for all-time.
+        - in: query
+          name: groupBy
+          schema: { type: string, enum: [day, month], default: month }
+      responses:
+        "200":
+          description: Platform revenue summary + time series + period comparison
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  summary:
+                    type: object
+                    properties:
+                      gmv: { type: string, example: '125000000' }
+                      commissionPending: { type: string, example: '5000000' }
+                      commissionSettled: { type: string, example: '13750000' }
+                      refunded: { type: string, example: '2000000' }
+                      netPlatformRevenue: { type: string, example: '18750000' }
+                      bookingCount: { type: integer, example: 250 }
+                  groupBy: { type: string, example: month }
+                  series:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        period: { type: string, example: '2026-07' }
+                        gmv: { type: string }
+                        commission: { type: string }
+                        netPlatformRevenue: { type: string }
+                        bookingCount: { type: integer }
+                  comparison:
+                    nullable: true
+                    description: Present only when both from and to are supplied; otherwise null.
+                    type: object
+                    properties:
+                      previous:
+                        type: object
+                        properties:
+                          gmv: { type: string }
+                          netPlatformRevenue: { type: string }
+                      change:
+                        type: object
+                        properties:
+                          gmvPct: { type: number, nullable: true, example: 12.5 }
+                          netRevenuePct: { type: number, nullable: true, example: 8.3 }
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/commissions:
+    get:
+      summary: List platform commissions (admin)
+      description: >
+        Admin/platform_manager (manageCommissions) lists platform commission records, filtered by
+        status (pending/settled/disputed) and partner. Each item includes the partner and booking.
+      tags: [Admin]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [pending, settled, disputed]
+        - in: query
+          name: partnerId
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        - in: query
+          name: page
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Paginated commissions
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaginatedCommissions' }
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/commissions/{commissionId}/settle:
+    patch:
+      summary: Mark a commission as settled / paid out (admin)
+      description: >
+        Sets a commission's status to settled (payout done) and stamps settledAt. Rejected if already
+        settled. Writes an audit log entry.
+      tags: [Admin]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: commissionId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Updated commission
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Commission' }
+        "400":
+          description: Already settled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+
+  /admin/hotels:
+    get:
+      summary: List all hotels platform-wide (admin)
+      description: >
+        Admin/platform_manager (manageHotels) lists ALL hotels including unlisted / suspended ones,
+        filtered by isListed, isActive and a name/city search. Each item includes the owning partner.
+      tags: [Admin]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: search
+          schema:
+            type: string
+        - in: query
+          name: isListed
+          schema:
+            type: boolean
+        - in: query
+          name: isActive
+          schema:
+            type: boolean
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        - in: query
+          name: page
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Paginated hotels
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaginatedAdminHotels' }
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/hotels/{hotelId}:
+    patch:
+      summary: Toggle a hotel's listing / active flags (admin)
+      description: >
+        Admin/platform_manager (manageHotels) approves/delists (isListed) or suspends/reactivates
+        (isActive) a hotel. Send at least one flag. Writes an audit log entry.
+      tags: [Admin]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                isListed:
+                  type: boolean
+                isActive:
+                  type: boolean
+              example:
+                isListed: false
+      responses:
+        "200":
+          description: Updated hotel
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Hotel' }
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+
+  /platform-manager/partners:
+    get:
+      summary: List all hotel partners (Platform Manager)
+      description: >
+        Platform_manager/admin (viewPlatformStats). Lists every hotel partner platform-wide, filtered by
+        status and a name/email search. Each item includes the owner account and the partner's hotel count.
+      tags: [PlatformManager]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: status
+          schema: { type: string, enum: [pending, approved, suspended, rejected] }
+        - in: query
+          name: search
+          schema: { type: string }
+          description: Match businessName or contactEmail
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100 }
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: Paginated partner list
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaginatedPartners' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /platform-manager/bookings:
+    get:
+      summary: List all platform bookings (Platform Manager)
+      description: >
+        Platform_manager/admin (viewPlatformStats). Lists every booking platform-wide, filtered by status,
+        hotel, partner and check-in date range, plus a search over booking code / customer name / email.
+      tags: [PlatformManager]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: status
+          schema: { type: string, enum: [pending, confirmed, checked_in, checked_out, cancelled, no_show] }
+        - in: query
+          name: hotelId
+          schema: { type: string, format: uuid }
+        - in: query
+          name: partnerId
+          schema: { type: string, format: uuid }
+          description: Narrow to bookings of one partner's hotels
+        - in: query
+          name: fromDate
+          schema: { type: string, format: date }
+        - in: query
+          name: toDate
+          schema: { type: string, format: date }
+        - in: query
+          name: search
+          schema: { type: string }
+          description: Match bookingCode / customer fullName / customer email
+        - in: query
+          name: sortBy
+          schema: { type: string }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100 }
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: Paginated platform bookings
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaginatedOversightBookings' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /platform-manager/analytics:
+    get:
+      summary: Platform analytics report (Platform Manager)
+      description: >
+        Platform_manager/admin (viewPlatformStats). Totals (bookings, users, conversion rate =
+        confirmed/total), a month/year time-series for comparison, and top cities / top hotels by bookings.
+      tags: [PlatformManager]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: period
+          schema: { type: string, enum: [month, year] }
+          description: Time-series bucket (default month)
+        - in: query
+          name: range
+          schema: { type: integer, minimum: 1, maximum: 36 }
+          description: Number of recent buckets (default 12 months / 5 years)
+        - in: query
+          name: topLimit
+          schema: { type: integer, minimum: 1, maximum: 20 }
+          description: Max items for top city / top hotel lists (default 5)
+      responses:
+        '200':
+          description: Platform analytics report
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlatformAnalytics' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /platform-manager/performance:
+    get:
+      summary: Hotel performance leaderboard (Platform Manager)
+      description: >
+        Platform_manager/admin (viewPlatformStats). Ranks all hotels by composite performance score
+        over a window (default last 90 days). Hotels lacking data are placed last.
+      tags: [PlatformManager]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: from
+          schema: { type: string, format: date }
+        - in: query
+          name: to
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: Hotels ranked by score
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PerformanceLeaderboard' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /platform-manager/hotels/{hotelId}/performance:
+    get:
+      summary: One hotel's performance & score (Platform Manager)
+      description: >
+        Platform_manager/admin (viewPlatformStats). occupancyRate, cancellationRate, avgRating,
+        avgResponseMinutes and a weighted composite score (rating 40% / occupancy 25% / cancel 20% /
+        response 15%) for one hotel over a window (default last 90 days).
+      tags: [PlatformManager]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: query
+          name: from
+          schema: { type: string, format: date }
+        - in: query
+          name: to
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: Hotel performance and score
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HotelPerformance' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/audit-logs:
+    get:
+      summary: List audit logs (admin)
+      description: >
+        Admin/platform_manager (viewPlatformStats) lists audit log entries written on sensitive actions
+        (user status/role change, commission settle, hotel flag change), filtered by action, entityType
+        and actor. Each entry includes the acting user.
+      tags: [Admin]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: action
+          schema:
+            type: string
+        - in: query
+          name: entityType
+          schema:
+            type: string
+        - in: query
+          name: userId
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        - in: query
+          name: page
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Paginated audit logs
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaginatedAuditLogs' }
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+
+  /internal/jobs/release-holds:
+    post:
+      summary: Release expired booking holds (cron)
+      description: >
+        Called by an external scheduler (e.g. cron-job.org) on a schedule (suggested every 5 minutes).
+        Cancels pending bookings whose 15-minute payment hold expired and returns their inventory.
+        Protected by the x-cron-secret header (not user JWT). Idempotent — safe to call repeatedly.
+      tags: [Internal]
+      parameters:
+        - in: header
+          name: x-cron-secret
+          required: true
+          schema:
+            type: string
+          description: Must equal the server's CRON_SECRET
+      responses:
+        "200":
+          description: Number of holds released
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  released:
+                    type: integer
+        "401":
+          description: Missing or wrong cron secret
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /internal/jobs/sweep-no-shows:
+    post:
+      summary: Mark elapsed confirmed bookings as no-show (cron)
+      description: >
+        Called by an external scheduler (suggested hourly). Marks confirmed bookings whose stay window
+        has fully elapsed without check-in as no_show. Protected by x-cron-secret. Idempotent.
+      tags: [Internal]
+      parameters:
+        - in: header
+          name: x-cron-secret
+          required: true
+          schema:
+            type: string
+          description: Must equal the server's CRON_SECRET
+      responses:
+        "200":
+          description: Number of bookings marked no-show
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  noShow:
+                    type: integer
+        "401":
+          description: Missing or wrong cron secret
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /internal/jobs/settle-commissions:
+    post:
+      summary: Auto-settle eligible commissions (cron)
+      description: >
+        Called by an external scheduler (suggested daily). Settles every pending commission whose
+        booking has checked out and passed the reconciliation hold period, moving the hotel's net from
+        the wallet's pending to available balance. Protected by x-cron-secret. Idempotent — conditional
+        updates prevent double-settlement.
+      tags: [Internal]
+      parameters:
+        - in: header
+          name: x-cron-secret
+          required: true
+          schema:
+            type: string
+          description: Must equal the server's CRON_SECRET
+      responses:
+        "200":
+          description: Number of commissions settled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  settled:
+                    type: integer
+        "401":
+          description: Missing or wrong cron secret
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/send-otp:
+    post:
+      summary: Send OTP verification code
+      description: Generates a 6-digit verification code and emails it to the user.
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+              properties:
+                email:
+                  type: string
+                  format: email
+              example:
+                email: khiembadinh987@gmail.com
+      responses:
+        '200':
+          description: OTP Sent successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  message:
+                    type: string
+                    example: Verification OTP sent successfully to khiembadinh987@gmail.com
+        '400':
+          description: Email already taken or invalid format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/register:
+    post:
+      summary: Register as user
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+                - email
+                - password
+              properties:
+                name:
+                  type: string
+                email:
+                  type: string
+                  format: email
+                  description: must be unique
+                password:
+                  type: string
+                  format: password
+                  minLength: 8
+                  description: At least one number and one letter
+              example:
+                name: fake name
+                email: fake@example.com
+                password: password1
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    $ref: '#/components/schemas/User'
+                  tokens:
+                    $ref: '#/components/schemas/AuthTokens'
+        '400':
+          $ref: '#/components/responses/DuplicateEmail'
+
+  /auth/register-partner:
+    post:
+      summary: Register as hotel partner
+      description: >
+        Đăng ký tài khoản đối tác khách sạn (role `hotel_partner`), không cần manager duyệt.
+        Yêu cầu OTP đã gửi trước qua `POST /auth/send-otp`. Tài khoản tạo ra sẵn sàng đăng nhập
+        và nộp hồ sơ khách sạn qua `POST /hotel-partners/registrations`.
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+                - email
+                - password
+                - verificationCode
+              properties:
+                name:
+                  type: string
+                email:
+                  type: string
+                  format: email
+                  description: must be unique
+                password:
+                  type: string
+                  format: password
+                  minLength: 8
+                  description: At least one number and one letter
+                verificationCode:
+                  type: string
+                  description: Mã OTP 6 số nhận qua email từ /auth/send-otp
+              example:
+                name: Nguyen Van An
+                email: owner@hotel.com
+                password: password1
+                verificationCode: '123456'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    $ref: '#/components/schemas/User'
+                  tokens:
+                    $ref: '#/components/schemas/AuthTokens'
+        '400':
+          description: OTP sai/hết hạn, quá số lần thử, mật khẩu yếu, hoặc email đã tồn tại
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: 400
+                message: Invalid or expired verification code
+
+  /auth/login:
+    post:
+      summary: Login
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - password
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  format: password
+              example:
+                email: fake@example.com
+                password: password1
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    $ref: '#/components/schemas/User'
+                  tokens:
+                    $ref: '#/components/schemas/AuthTokens'
+        '401':
+          description: Invalid email or password
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: 401
+                message: Invalid email or password
+
+  /auth/logout:
+    post:
+      summary: Logout
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - refreshToken
+              properties:
+                refreshToken:
+                  type: string
+              example:
+                refreshToken: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1ZWJhYzUzNDk1NGI1NDEzOTgwNmMxMTIiLCJpYXQiOjE1ODkyOTg0ODQsImV4cCI6MTU4OTMwMDI4NH0.m1U63blB0MLej_WfB7yC2FTMnCziif9X8yzwDEfJXAg
+      responses:
+        '204':
+          description: No content
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /auth/refresh-tokens:
+    post:
+      summary: Refresh auth tokens
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - refreshToken
+              properties:
+                refreshToken:
+                  type: string
+              example:
+                refreshToken: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1ZWJhYzUzNDk1NGI1NDEzOTgwNmMxMTIiLCJpYXQiOjE1ODkyOTg0ODQsImV4cCI6MTU4OTMwMDI4NH0.m1U63blB0MLej_WfB7yC2FTMnCziif9X8yzwDEfJXAg
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthTokens'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/forgot-password:
+    post:
+      summary: Forgot password
+      description: An email will be sent to reset password.
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+              properties:
+                email:
+                  type: string
+                  format: email
+              example:
+                email: fake@example.com
+      responses:
+        '204':
+          description: No content
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /auth/reset-password:
+    post:
+      summary: Reset password
+      tags: [Auth]
+      parameters:
+        - in: query
+          name: token
+          required: true
+          schema:
+            type: string
+          description: The reset password token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - password
+              properties:
+                password:
+                  type: string
+                  format: password
+                  minLength: 8
+                  description: At least one number and one letter
+              example:
+                password: password1
+      responses:
+        '204':
+          description: No content
+        '401':
+          description: Password reset failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: 401
+                message: Password reset failed
+
+  /auth/send-verification-email:
+    post:
+      summary: Send verification email
+      description: An email will be sent to verify email.
+      tags: [Auth]
+      security:
+        - bearerAuth: []
+      responses:
+        '204':
+          description: No content
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/verify-email:
+    post:
+      summary: verify email
+      tags: [Auth]
+      parameters:
+        - in: query
+          name: token
+          required: true
+          schema:
+            type: string
+          description: The verify email token
+      responses:
+        '204':
+          description: No content
+        '401':
+          description: verify email failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: 401
+                message: verify email failed
+
+  /users/me:
+    get:
+      summary: Get my own profile (self-service)
+      description: Auth. Returns the logged-in user's account and profile (passwordHash omitted).
+      tags: [Users]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: The authenticated user's account with profile
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MeProfile' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      summary: Update my own profile (self-service)
+      description: >
+        Auth. The logged-in user updates their own basic fields (fullName, phone, avatarUrl) and
+        UserProfile fields (dateOfBirth, nationality, id/passport, preferredLanguage/Currency,
+        marketingOptIn). email / role / status are NOT editable here. At least one field required.
+      tags: [Users]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                fullName: { type: string, maxLength: 255 }
+                phone: { type: string, maxLength: 20, nullable: true }
+                avatarUrl: { type: string, format: uri, nullable: true }
+                dateOfBirth: { type: string, format: date, nullable: true }
+                nationality: { type: string, maxLength: 100, nullable: true }
+                idCardNumber: { type: string, maxLength: 50, nullable: true }
+                passportNumber: { type: string, maxLength: 50, nullable: true }
+                preferredLanguage: { type: string, enum: [vi, en] }
+                preferredCurrency: { type: string, enum: [VND, USD] }
+                marketingOptIn: { type: boolean }
+      responses:
+        '200':
+          description: Updated profile
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MeProfile' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /users/me/password:
+    patch:
+      summary: Change my own password (self-service)
+      description: >
+        Auth. Verifies the current password, then sets a new one (must differ from the current).
+        Separate from the email-token forgot/reset flow.
+      tags: [Users]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword, newPassword]
+              properties:
+                currentPassword: { type: string, format: password }
+                newPassword:
+                  type: string
+                  format: password
+                  minLength: 8
+                  description: At least one letter and one number
+      responses:
+        '204': { description: Password changed }
+        '400':
+          description: Current password wrong, or new password same as current
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /users:
+    post:
+      summary: Create a user
+      description: Only admins can create other users.
+      tags: [Users]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+                - email
+                - password
+                - role
+              properties:
+                name:
+                  type: string
+                email:
+                  type: string
+                  format: email
+                  description: must be unique
+                password:
+                  type: string
+                  format: password
+                  minLength: 8
+                  description: At least one number and one letter
+                role:
+                  type: string
+                  enum: [user, admin]
+              example:
+                name: fake name
+                email: fake@example.com
+                password: password1
+                role: user
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/DuplicateEmail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+    get:
+      summary: Get all users
+      description: Only admins can retrieve all users.
+      tags: [Users]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: name
+          schema:
+            type: string
+          description: User name
+        - in: query
+          name: role
+          schema:
+            type: string
+          description: User role
+        - in: query
+          name: sortBy
+          schema:
+            type: string
+          description: sort by query in the form of field:desc/asc (ex. name:asc)
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+          default: 10
+          description: Maximum number of users
+        - in: query
+          name: page
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+          description: Page number
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/User'
+                  page:
+                    type: integer
+                    example: 1
+                  limit:
+                    type: integer
+                    example: 10
+                  totalPages:
+                    type: integer
+                    example: 1
+                  totalResults:
+                    type: integer
+                    example: 1
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /users/{id}:
+    get:
+      summary: Get a user
+      description: Logged in users can fetch only their own user information. Only admins can fetch other users.
+      tags: [Users]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: User id
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    patch:
+      summary: Update a user
+      description: Logged in users can only update their own information. Only admins can update other users.
+      tags: [Users]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: User id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                email:
+                  type: string
+                  format: email
+                  description: must be unique
+                password:
+                  type: string
+                  format: password
+                  minLength: 8
+                  description: At least one number and one letter
+              example:
+                name: fake name
+                email: fake@example.com
+                password: password1
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/DuplicateEmail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      summary: Delete a user
+      description: Logged in users can delete only themselves. Only admins can delete other users.
+      tags: [Users]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: User id
+      responses:
+        '204':
+          description: User deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /users/{userId}/status:
+    patch:
+      summary: Change a user's account status (admin)
+      description: >
+        Admin/platform_manager (manageUsers) sets a user's status to active, inactive or suspended.
+        Suspending takes effect immediately — both login and JWT verification reject non-active users.
+        Cannot change your own status.
+      tags: [Users]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - status
+              properties:
+                status:
+                  type: string
+                  enum: [active, inactive, suspended]
+              example:
+                status: suspended
+      responses:
+        '200':
+          description: Updated user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          description: Cannot change your own status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /users/{userId}/role:
+    patch:
+      summary: Change a user's role (admin only)
+      description: >
+        Requires the manageRoles right (admin only — platform_manager does NOT have it). Cannot change
+        your own role, and cannot demote the last remaining admin.
+      tags: [Users]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: userId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - role
+              properties:
+                role:
+                  type: string
+                  enum: [guest, customer, staff, hotel_partner, platform_manager, admin]
+              example:
+                role: staff
+      responses:
+        '200':
+          description: Updated user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          description: Cannot change own role / cannot demote last admin
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /uploads:
+    post:
+      summary: Upload a file to Cloudinary
+      description: Uploads a single image/PDF (multipart field "file") and returns its public URL.
+      tags: [Uploads]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: folder
+          schema:
+            type: string
+            enum: [licenses, representatives, properties, documents]
+          description: Cloudinary sub-folder to group the file
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: Uploaded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url:
+                    type: string
+                    example: https://res.cloudinary.com/demo/image/upload/v1/smartstay/licenses/abc.jpg
+                  publicId:
+                    type: string
+                    example: smartstay/licenses/abc
+        '400':
+          description: No file uploaded or invalid file type/size
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /hotel-partners/me/bookings:
+    get:
+      summary: List all bookings across my hotels (partner)
+      description: >
+        Auth (partner). Lists bookings of ALL hotels owned by the logged-in partner (partner derived from
+        token). Optionally narrow to one of their hotels via hotelId. Same shape as the platform oversight list.
+      tags: [HotelPartners]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: status
+          schema: { type: string, enum: [pending, confirmed, checked_in, checked_out, cancelled, no_show] }
+        - in: query
+          name: hotelId
+          schema: { type: string, format: uuid }
+          description: Narrow to one of the partner's hotels
+        - in: query
+          name: fromDate
+          schema: { type: string, format: date }
+        - in: query
+          name: toDate
+          schema: { type: string, format: date }
+        - in: query
+          name: search
+          schema: { type: string }
+          description: Match bookingCode / customer fullName / customer email
+        - in: query
+          name: sortBy
+          schema: { type: string }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100 }
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: Paginated bookings across the partner's hotels
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaginatedOversightBookings' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /hotel-partners/registrations:
+    post:
+      summary: Submit a hotel partner registration
+      description: >
+        Reuses the user's active partner or creates one if none (a partner can own multiple hotels),
+        then creates a Hotel (not yet active), its licenses, representative, images, payout account,
+        room config and a pending verification request — all in one transaction.
+        Any authenticated user can submit. File URLs must be uploaded via POST /uploads first.
+      tags: [HotelPartners]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HotelRegistrationRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HotelVerificationRequest'
+        '400':
+          description: Validation error or duplicate pending/approved partner
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    get:
+      summary: List verification requests (platform manager)
+      tags: [HotelPartners]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [pending, in_review, approved, rejected]
+        - in: query
+          name: sortBy
+          schema:
+            type: string
+          description: 'field:(desc|asc) e.g. submittedAt:desc'
+        - in: query
+          name: limit
+          schema:
+            type: integer
+        - in: query
+          name: page
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/HotelVerificationRequestSummary'
+                  page: { type: integer, example: 1 }
+                  limit: { type: integer, example: 10 }
+                  totalPages: { type: integer, example: 1 }
+                  totalResults: { type: integer, example: 1 }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /hotel-partners/registrations/me:
+    get:
+      summary: List my own verification requests
+      tags: [HotelPartners]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/HotelVerificationRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /hotel-partners/registrations/{requestId}:
+    get:
+      summary: Get a verification request by id
+      description: Accessible by the owner or a platform manager.
+      tags: [HotelPartners]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: requestId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HotelVerificationRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /hotel-partners/registrations/{requestId}/review:
+    patch:
+      summary: Approve or reject a verification request (platform manager)
+      description: >
+        On approve - partner becomes approved, the owner user's role is upgraded to hotel_partner,
+        the hotel is activated but NOT yet published (isListed=false), RoomType + Room records are
+        seeded from the declared roomConfig (rooms inactive until the partner completes details and
+        publishes in Room Inventory), and the partner receives a 'partner_approved' notification.
+        On reject - a rejectionReason is required. In both cases an email with the result (approved /
+        rejected) is sent to the partner's registration email after the change is committed.
+      tags: [HotelPartners]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: requestId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - decision
+              properties:
+                decision:
+                  type: string
+                  enum: [approve, reject]
+                rejectionReason:
+                  type: string
+                  description: Required when decision is "reject"
+      responses:
+        '200':
+          description: Reviewed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HotelVerificationRequest'
+        '400':
+          description: Already reviewed or invalid payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /hotel-partners/documents/{documentId}/review:
+    patch:
+      summary: Approve or reject a single document (platform manager)
+      description: >
+        Fine-grained review (Hướng B). On approve, if the document type is also a license type,
+        the matching license's current_document_id is set to this document.
+      tags: [HotelPartners]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: documentId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - decision
+              properties:
+                decision:
+                  type: string
+                  enum: [approve, reject]
+      responses:
+        '200':
+          description: Reviewed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HotelVerificationDocument'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /hotels:
+    get:
+      summary: Search hotels by city (with availability check)
+      description: >
+        Public. Returns active & listed hotels. When checkIn/checkOut are provided (they must go
+        together), only hotels with at least one room type available for every night of the stay
+        are returned. Each result includes minPrice (lowest base price among matching room types).
+      tags: [Hotels]
+      parameters:
+        - in: query
+          name: city
+          schema:
+            type: string
+          description: Case-insensitive partial match
+        - in: query
+          name: checkIn
+          schema:
+            type: string
+            format: date
+        - in: query
+          name: checkOut
+          schema:
+            type: string
+            format: date
+          description: Must be after checkIn
+        - in: query
+          name: guests
+          schema:
+            type: integer
+            minimum: 1
+          description: Only hotels having a room type with maxOccupancy >= guests
+        - in: query
+          name: sortBy
+          schema:
+            type: string
+          description: 'field:(desc|asc) e.g. starRating:desc'
+        - in: query
+          name: limit
+          schema:
+            type: integer
+        - in: query
+          name: page
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Paginated hotel list ({ results, page, limit, totalPages, totalResults })
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaginatedHotels' }
+        '400':
+          description: Invalid query (e.g. checkIn without checkOut)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /hotels/{hotelId}:
+    get:
+      summary: Get a hotel's full profile by id
+      description: >
+        Public. Returns one active & listed hotel with all images, hotel amenities and its active
+        room types (each with images, amenities and base price). Date-based availability/pricing is
+        fetched separately via GET /hotels/{hotelId}/room-types?checkIn=&checkOut=.
+      tags: [Hotels]
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Hotel profile (info + images + amenities + active room types)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Hotel' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      summary: Update a hotel's profile (partner)
+      description: >
+        Auth. The owner (or manageHotels) updates editable profile fields (name, description, address,
+        city/district/ward, country, coordinates, star rating, check-in/out times, business type).
+        Locked here: isActive/isListed (dedicated flows) and legal fields (taxCode,
+        businessRegistrationNumber). All fields optional; at least one required.
+      tags: [HotelManagement]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                name: { type: string }
+                description: { type: string, nullable: true }
+                address: { type: string }
+                city: { type: string }
+                country: { type: string }
+                district: { type: string, nullable: true }
+                ward: { type: string, nullable: true }
+                latitude: { type: number, nullable: true }
+                longitude: { type: number, nullable: true }
+                starRating: { type: integer, minimum: 1, maximum: 5, nullable: true }
+                checkInTime: { type: string, example: '14:00' }
+                checkOutTime: { type: string, example: '12:00' }
+                businessType: { type: string, enum: [hotel, resort, villa, apartment] }
+                # ----- Chi tiết bổ sung kiểu booking.com (Pha 1 DB) -----
+                postalCode: { type: string, nullable: true }
+                phone: { type: string, nullable: true }
+                email: { type: string, format: email, nullable: true }
+                totalFloors: { type: integer, minimum: 0, maximum: 200, nullable: true }
+                builtYear: { type: integer, minimum: 1800, maximum: 2100, nullable: true }
+                renovationYear: { type: integer, minimum: 1800, maximum: 2100, nullable: true }
+                isSmokingAllowed: { type: boolean }
+                petsPolicy: { type: string, enum: [not_allowed, allowed, on_request], nullable: true }
+                cancellationPolicy: { type: string, nullable: true }
+                childrenPolicy: { type: string, nullable: true }
+                minGuestAge: { type: integer, minimum: 0, maximum: 120, nullable: true }
+                securityDepositAmount: { type: number, minimum: 0, nullable: true }
+                languagesSpoken: { type: array, items: { type: string }, description: 'send [] to clear' }
+                maxLengthOfStay: { type: integer, minimum: 1, maximum: 365, nullable: true }
+      responses:
+        '200':
+          description: Updated hotel
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Hotel' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /hotels/{hotelId}/manage:
+    get:
+      summary: Get a hotel's full profile for management (owner/manager)
+      description: >
+        Auth. Returns the hotel REGARDLESS of status (including unlisted/pending) for the owner
+        (or a user with the manageHotels right) — used by the partner's Hotel Management screen.
+        Includes all images, amenities and ALL room types (active + inactive), each with its room count.
+      tags: [HotelManagement]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Full hotel profile (any status) for management
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Hotel' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /hotels/{hotelId}/revenue:
+    get:
+      summary: Hotel revenue report (owner/manager)
+      description: >
+        Auth. Revenue for ONE hotel over [from, to]. gross = total of settled bookings
+        (confirmed/checked_in/checked_out); commission = platform commission; net = gross − commission;
+        refunded = total refunded. Includes a day/month time series. All money values are strings.
+        Access is limited to the hotel owner, a manager, or assigned staff (checked in-service).
+      tags: [Revenue]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: query
+          name: from
+          schema: { type: string, format: date }
+          description: Inclusive start date (YYYY-MM-DD). Omit for all-time.
+        - in: query
+          name: to
+          schema: { type: string, format: date }
+          description: Inclusive end date (YYYY-MM-DD). Omit for all-time.
+        - in: query
+          name: groupBy
+          schema: { type: string, enum: [day, month], default: day }
+      responses:
+        '200':
+          description: Revenue summary + time series
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  summary:
+                    type: object
+                    properties:
+                      gross: { type: string, example: '12500000' }
+                      commission: { type: string, example: '1875000' }
+                      net: { type: string, example: '10625000' }
+                      refunded: { type: string, example: '500000' }
+                      bookingCount: { type: integer, example: 25 }
+                  groupBy: { type: string, example: day }
+                  series:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        period: { type: string, example: '2026-07-01' }
+                        gross: { type: string }
+                        commission: { type: string }
+                        net: { type: string }
+                        bookingCount: { type: integer }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /hotels/{hotelId}/wallet:
+    get:
+      summary: Hotel wallet balance + transactions (owner/manager)
+      description: >
+        Auth. Wallet balances (available/pending) and the paginated transaction ledger for ONE hotel.
+        A hotel with no transactions yet returns a zero-balance wallet instead of 404.
+        Money values are strings. Access checked in-service (owner/manager/assigned staff).
+      tags: [Revenue]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: query
+          name: type
+          schema: { type: string, enum: [earning, commission, payout, refund, adjustment] }
+          description: Filter transactions by type.
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1, default: 1 }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: Wallet balances + paginated transactions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  wallet:
+                    type: object
+                    properties:
+                      balanceAvailable: { type: string, example: '10625000' }
+                      balancePending: { type: string, example: '0' }
+                      currency: { type: string, example: VND }
+                  transactions:
+                    type: object
+                    properties:
+                      results:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id: { type: string, format: uuid }
+                            type: { type: string, example: earning }
+                            amount: { type: string, example: '850000' }
+                            balanceAfter: { type: string, example: '850000' }
+                            bookingId: { type: string, format: uuid, nullable: true }
+                            commissionId: { type: string, format: uuid, nullable: true }
+                            description: { type: string, nullable: true }
+                            createdAt: { type: string, format: date-time }
+                      page: { type: integer }
+                      limit: { type: integer }
+                      totalPages: { type: integer }
+                      totalResults: { type: integer }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /hotels/{hotelId}/analytics:
+    get:
+      summary: Hotel operational analytics + score (owner/manager)
+      description: >
+        Auth. Operational performance for ONE hotel over a window (default last 90 days): occupancyRate,
+        cancellationRate, avgRating, avgResponseMinutes, plus each metric normalized to 0..100 and a
+        weighted overall score (rating 40% / occupancy 25% / cancellation 20% / response 15%). Reuses the
+        platform performance logic but scoped to the hotel owner/manager (checked in-service). This is the
+        partner-facing view of the same metrics platform managers see at /platform-manager.
+      tags: [Revenue]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: query
+          name: from
+          schema: { type: string, format: date }
+          description: Window start (YYYY-MM-DD). Defaults to 90 days before "to".
+        - in: query
+          name: to
+          schema: { type: string, format: date }
+          description: Window end (YYYY-MM-DD). Defaults to today.
+      responses:
+        '200':
+          description: Hotel performance metrics + scores
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  hotelId: { type: string, format: uuid }
+                  hotelName: { type: string }
+                  city: { type: string }
+                  window:
+                    type: object
+                    properties:
+                      from: { type: string, format: date-time }
+                      to: { type: string, format: date-time }
+                  metrics:
+                    type: object
+                    properties:
+                      occupancyRate: { type: number, nullable: true, example: 0.72 }
+                      cancellationRate: { type: number, nullable: true, example: 0.08 }
+                      avgRating: { type: number, nullable: true, example: 4.3 }
+                      avgResponseMinutes: { type: number, nullable: true, example: 45 }
+                      totalBookings: { type: integer }
+                      cancelledBookings: { type: integer }
+                      reviewCount: { type: integer }
+                  scores:
+                    type: object
+                    properties:
+                      rating: { type: integer, nullable: true }
+                      occupancy: { type: integer, nullable: true }
+                      cancellation: { type: integer, nullable: true }
+                      response: { type: integer, nullable: true }
+                  score: { type: integer, nullable: true, example: 82 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /hotels/{hotelId}/publish:
+    patch:
+      summary: Toggle a hotel's listing on/off (partner self-publish)
+      description: >
+        Auth. The owner (or a user with manageHotels) turns the hotel's marketplace listing on or off
+        via { isListed }. Turning ON requires the hotel to be approved (isActive) and to have at least
+        one active room type (priced) — otherwise 400. Turning OFF is unconditional.
+      tags: [HotelManagement]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [isListed]
+              properties:
+                isListed: { type: boolean }
+      responses:
+        '200':
+          description: Updated hotel
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Hotel' }
+        '400':
+          description: Not approved yet, or no active room type when turning on
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /hotels/mine:
+    get:
+      summary: List hotels owned by the current partner
+      description: >
+        Auth. Returns every hotel owned by the LOGGED-IN user (partner) — including unlisted/pending
+        ones (soft-deleted excluded) — for the partner's Hotel Management screen. The owner id is taken
+        from the token, NOT the URL. Each item includes the cover image and a count of room types and rooms.
+      tags: [HotelManagement]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Array of hotels (each with primary image + _count of roomTypes/rooms)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/HotelSummary' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /hotels/staff/mine:
+    get:
+      summary: List hotels the current staff is assigned to
+      description: >
+        Auth (staff). Returns hotels the LOGGED-IN staff is currently assigned to (via
+        hotel_staff_assignments, unassignedAt = null). The staff portal uses this to know which hotel(s)
+        to operate on (bookings / room status / check-in-out). Staff id is taken from the token.
+      tags: [HotelManagement]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Array of assigned hotels (each with primary image + _count of roomTypes/rooms)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/HotelSummary' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /hotels/{hotelId}/images:
+    post:
+      summary: Add hotel images (partner)
+      description: URLs must be uploaded via POST /uploads first. If any image has isPrimary=true, the previous primary is cleared.
+      tags: [HotelManagement]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [images]
+              properties:
+                images:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    required: [url, imageCategory]
+                    properties:
+                      url: { type: string, format: uri }
+                      imageCategory: { type: string, enum: [cover, exterior, room] }
+                      caption: { type: string }
+                      isPrimary: { type: boolean }
+                      sortOrder: { type: integer }
+      responses:
+        '201':
+          description: Hotel images after insert
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/HotelImage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /hotels/{hotelId}/images/{imageId}:
+    delete:
+      summary: Delete a hotel image (partner)
+      tags: [HotelManagement]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: path
+          name: imageId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Deleted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /hotels/{hotelId}/images/{imageId}/primary:
+    patch:
+      summary: Set a hotel image as primary (partner)
+      description: Marks this image isPrimary=true and clears the flag on the hotel's other images.
+      tags: [HotelManagement]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: path
+          name: imageId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The updated primary image
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HotelImage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /hotels/{hotelId}/room-types:
+    get:
+      summary: Search room types within a hotel (with filters)
+      description: >
+        Public. Filters by capacity, price range, bed type and view type. When checkIn/checkOut
+        are provided, each room type includes numNights, availableRooms and totalPrice for the
+        stay (per-night priceOverride applied), and sold-out room types are excluded.
+      tags: [Hotels]
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: checkIn
+          schema:
+            type: string
+            format: date
+        - in: query
+          name: checkOut
+          schema:
+            type: string
+            format: date
+        - in: query
+          name: guests
+          schema:
+            type: integer
+            minimum: 1
+        - in: query
+          name: minPrice
+          schema:
+            type: number
+        - in: query
+          name: maxPrice
+          schema:
+            type: number
+        - in: query
+          name: bedType
+          schema:
+            type: string
+        - in: query
+          name: viewType
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Room types with images & amenities (plus availability and total price when dates given)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/RoomType' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /notifications:
+    get:
+      summary: List the current user's notifications
+      description: >
+        Paginated list of the authenticated user's own notifications (newest first). Filter by
+        `type` or `unreadOnly=true`. The response also includes `unreadCount` (total unread across
+        all types) so the client can render a badge without a second request.
+      tags: [Notifications]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: unreadOnly
+          schema:
+            type: boolean
+          description: When true, only notifications that have not been read yet
+        - in: query
+          name: type
+          schema:
+            type: string
+            enum: [booking_confirmed, payment_success, check_in_reminder, review_request, alert, promotion, partner_approved]
+        - in: query
+          name: sortBy
+          schema:
+            type: string
+          description: 'field:asc|desc, e.g. createdAt:desc'
+        - in: query
+          name: limit
+          schema:
+            type: integer
+        - in: query
+          name: page
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Paginated notifications of the current user (with unreadCount)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaginatedNotifications' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /notifications/unread-count:
+    get:
+      summary: Get the current user's unread notification count
+      tags: [Notifications]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Unread count for the badge
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  unreadCount: { type: integer, example: 3 }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /notifications/read-all:
+    post:
+      summary: Mark all the current user's notifications as read
+      tags: [Notifications]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Number of notifications updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  updated: { type: integer, example: 5 }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /notifications/{notificationId}/read:
+    patch:
+      summary: Mark one notification as read
+      description: >
+        Marks a single notification (owned by the authenticated user) as read. Idempotent —
+        an already-read notification keeps its original readAt timestamp.
+      tags: [Notifications]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: notificationId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The updated notification
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Notification' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /notifications/{notificationId}:
+    delete:
+      summary: Delete one of the current user's notifications
+      tags: [Notifications]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: notificationId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /bookings:
+    post:
+      summary: Create a booking
+      description: >
+        Authenticated customers book one room of a room type for [checkInDate, checkOutDate).
+        Prices are computed server-side (per-night priceOverride if set, else basePrice).
+        Inventory is reserved per night inside a transaction, so concurrent bookings cannot
+        oversell. paymentMethod "vnpay" (default) creates a "pending" booking held 15 min for online
+        payment; "cash" (pay at hotel) creates a "confirmed" booking with no hold plus a pending cash
+        Payment and an e-voucher — staff records the cash later via record-cash-payment.
+      tags: [Bookings]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - hotelId
+                - roomTypeId
+                - checkInDate
+                - checkOutDate
+                - numGuests
+              properties:
+                hotelId:
+                  type: string
+                  format: uuid
+                roomTypeId:
+                  type: string
+                  format: uuid
+                checkInDate:
+                  type: string
+                  format: date
+                checkOutDate:
+                  type: string
+                  format: date
+                  description: Must be after checkInDate (max 30 nights)
+                numGuests:
+                  type: integer
+                  minimum: 1
+                specialRequests:
+                  type: string
+                paymentMethod:
+                  type: string
+                  enum: [vnpay, sepay, cash]
+                  default: vnpay
+                  description: >
+                    vnpay = pay online via gateway (15 min hold); sepay = bank transfer by scanning a
+                    VietQR (30 min hold, confirmed by webhook); cash = pay at the hotel on arrival
+                    (confirmed immediately)
+              example:
+                hotelId: 11111111-1111-1111-1111-111111111111
+                roomTypeId: 22222222-2222-2222-2222-222222222222
+                checkInDate: '2026-07-01'
+                checkOutDate: '2026-07-03'
+                numGuests: 2
+                paymentMethod: cash
+      responses:
+        '201':
+          description: Booking created (includes bookingCode, totals, hotel & roomType summary)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Booking' }
+        '400':
+          description: Sold out for a night, past check-in date, or capacity exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /bookings/me:
+    get:
+      summary: List my bookings
+      tags: [Bookings]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [pending, confirmed, checked_in, checked_out, cancelled, no_show]
+        - in: query
+          name: sortBy
+          schema:
+            type: string
+          description: 'field:(desc|asc) e.g. createdAt:desc'
+        - in: query
+          name: limit
+          schema:
+            type: integer
+        - in: query
+          name: page
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Paginated booking list ({ results, page, limit, totalPages, totalResults })
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaginatedBookings' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /bookings/{bookingId}:
+    get:
+      summary: Get a booking by id
+      description: Accessible by the booking owner or a user with the manageBookings right.
+      tags: [Bookings]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: bookingId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Booking detail (with hotel & roomType summary)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Booking' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /bookings/{bookingId}/cancel:
+    patch:
+      summary: Cancel a booking
+      description: >
+        Owner (or manageBookings) cancels a pending/confirmed booking before its check-in date.
+        Reserved inventory is released immediately for every night of the stay.
+
+
+        If the booking was paid, the refund amount is computed from the hotel's cancellation policy
+        (default: full refund if cancelled ≥48h before check-in, otherwise the first night is kept as
+        a penalty) and a **refund REQUEST is created with status `pending`** — the money is NOT sent
+        yet. The hotel reviews it (PATCH /hotels/{hotelId}/refunds/{refundId}/review), then the
+        Platform Manager transfers the money and marks it processed
+        (PATCH /platform-manager/refunds/{refundId}/process). The
+        Payment status, platform commission and hotel wallet are only touched at that final step, so a
+        rejected request never wrongly debits the hotel.
+
+
+        The response includes a `refund` summary (`id`, `amount`, `status: pending`) when a refund is
+        due, or `null` when the policy leaves nothing to refund (late cancellation penalty).
+      tags: [Bookings]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: bookingId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Booking cancelled (with optional refund summary)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Booking' }
+        '400':
+          description: Not cancellable (wrong status or check-in date reached)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /payments/bookings/{bookingId}/vnpay:
+    post:
+      summary: Create a VNPay payment URL for a booking
+      description: >
+        Owner of a pending (not yet expired) booking requests a VNPay payment URL.
+        Creates a pending Payment row and returns the gateway URL the frontend should redirect to.
+        Requires VNP_TMN_CODE / VNP_HASH_SECRET to be configured (503 otherwise).
+      tags: [Payments]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: bookingId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '201':
+          description: Payment URL created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  paymentUrl:
+                    type: string
+                    example: https://sandbox.vnpayment.vn/paymentv2/vpcpay.html?vnp_Amount=...
+        '400':
+          description: Booking not payable (wrong status or hold expired)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          description: VNPay not configured
+
+  /hotels/{hotelId}/refunds:
+    get:
+      summary: List refund requests for a hotel (owner/manager/assigned staff)
+      description: >
+        Refund requests raised when a guest cancels a paid booking. The hotel side reviews them
+        (approve/reject); the Platform Manager is the one who actually transfers the money afterwards.
+        Filter by `status` to get the review queue (`pending`).
+      tags: [Refunds]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: query
+          name: status
+          schema: { type: string, enum: [pending, approved, processed, rejected] }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1, default: 1 }
+      responses:
+        '200':
+          description: Paginated refund requests (with requester, payment and booking summary)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items: { $ref: '#/components/schemas/Refund' }
+                  page: { type: integer }
+                  limit: { type: integer }
+                  totalPages: { type: integer }
+                  totalResults: { type: integer }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /hotels/{hotelId}/refunds/{refundId}/review:
+    patch:
+      summary: Approve or reject a refund request (hotel side)
+      description: >
+        Only a `pending` request can be reviewed. Approving does NOT move money — it just authorises
+        the Platform Manager to transfer it (see PATCH /platform-manager/refunds/{refundId}/process).
+        Rejecting requires a reason. Uses a conditional update so two reviewers racing cannot both win.
+
+
+        ⏰ **3-day deadline**: a nightly job auto-approves any request still `pending` after 3 days, so a
+        hotel cannot block a refund by staying silent (the amount comes from the hotel's own cancellation
+        policy — this step is for exceptions, not a veto). Reviewing an auto-approved request returns 400.
+      tags: [Refunds]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: path
+          name: refundId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision:
+                  type: string
+                  enum: [approve, reject]
+                rejectionReason:
+                  type: string
+                  maxLength: 500
+                  description: Required when decision = reject; forbidden otherwise
+              example:
+                decision: reject
+                rejectionReason: Khách huỷ sát giờ, đã giữ phòng nên không hoàn
+      responses:
+        '200':
+          description: Reviewed refund request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Refund' }
+        '400':
+          description: Already reviewed, or reject without a reason
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /platform-manager/refunds:
+    get:
+      summary: List refund requests platform-wide (Platform Manager)
+      description: Requires `manageCommissions`. Filter by status/hotel — use `status=approved` to get the payout queue.
+      tags: [Refunds]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: status
+          schema: { type: string, enum: [pending, approved, processed, rejected] }
+        - in: query
+          name: hotelId
+          schema: { type: string, format: uuid }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1, default: 1 }
+      responses:
+        '200':
+          description: Paginated refund requests
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items: { $ref: '#/components/schemas/Refund' }
+                  page: { type: integer }
+                  limit: { type: integer }
+                  totalPages: { type: integer }
+                  totalResults: { type: integer }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /platform-manager/refunds/{refundId}/process:
+    patch:
+      summary: Mark an approved refund as transferred (Platform Manager)
+      description: >
+        Requires `manageCommissions`. Call this AFTER the money has actually been transferred back to
+        the guest, passing the real bank/gateway transaction id.
+
+
+        Why the Platform Manager and not the hotel: guest money lands in the PLATFORM's bank account
+        (escrow) — the hotel wallet is only a ledger balance, so the hotel has no money to send back.
+        The hotel decides WHETHER to refund (review); the Platform Manager EXECUTES the transfer.
+
+
+        This is the ONLY place money actually leaves the hotel. In one transaction it sets the refund
+        to `processed`, marks the Payment `refunded` when the refund covers it fully, recomputes the
+        platform commission on the amount the hotel ACTUALLY KEEPS, and debits the hotel wallet by the
+        net difference. Only `approved` requests can be processed — a `pending` one must be reviewed
+        by the hotel first.
+      tags: [Refunds]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: refundId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refundTransactionId]
+              properties:
+                refundTransactionId:
+                  type: string
+                  maxLength: 100
+                  description: Real transfer/gateway transaction id — kept for reconciliation
+              example:
+                refundTransactionId: FT26071612345678
+      responses:
+        '200':
+          description: Refund processed (commission + wallet adjusted)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Refund' }
+        '400':
+          description: Not approved yet, or already processed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /payments/bookings/{bookingId}/sepay:
+    post:
+      summary: Create a SePay bank-transfer QR for a booking
+      description: >
+        Owner of a pending (not yet expired) booking requests a SePay VietQR.
+        Unlike VNPay there is no gateway to redirect to — the guest scans the returned QR image with
+        their banking app and transfers the exact amount, keeping `transferContent` (the booking code)
+        untouched so the webhook can reconcile it. The booking is only confirmed once SePay calls
+        POST /payments/sepay/webhook. Calling this repeatedly returns the SAME transfer content
+        (one SePay payment per booking). Requires SEPAY_API_KEY / SEPAY_ACCOUNT_NUMBER /
+        SEPAY_BANK_CODE to be configured (503 otherwise).
+      tags: [Payments]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: bookingId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '201':
+          description: QR + transfer instructions created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  qrUrl:
+                    type: string
+                    description: VietQR image URL — render directly with an img tag
+                    example: https://qr.sepay.vn/img?acc=0010000000355&bank=Vietcombank&amount=1800000&des=BKMRJ0NXGQ341D22
+                  transferContent:
+                    type: string
+                    description: Guest MUST keep this as the transfer content (it is the booking code)
+                    example: BKMRJ0NXGQ341D22
+                  amount:
+                    type: number
+                    example: 1800000
+                  accountNumber:
+                    type: string
+                  bankCode:
+                    type: string
+                    example: Vietcombank
+                  expiresAt:
+                    type: string
+                    format: date-time
+                    nullable: true
+                    description: Booking hold deadline — transfers after this are not auto-confirmed
+        '400':
+          description: Booking not payable (wrong status or hold expired)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          description: SePay not configured
+
+  /payments/sepay/webhook:
+    post:
+      summary: SePay webhook — bank account credited (public, called by SePay)
+      description: >
+        Called SERVER-TO-SERVER by SePay whenever the linked bank account balance changes.
+        Authenticated with the header `Authorization: Apikey <SEPAY_API_KEY>` — NOT a user JWT.
+        Only `transferType: "in"` is processed; the booking code is extracted from `code`/`content`,
+        the amount is verified, then the booking is confirmed (commission + wallet + voucher + email),
+        reusing the same transaction as the VNPay flow. The key is read from SEPAY_WEBHOOK_API_KEY.
+
+
+        Idempotent: SePay retries up to 7 times over 5 hours, so an already-completed payment simply
+        returns success without reprocessing. Business mismatches (booking code not found, underpaid)
+        also return 200 `{ success: true }` — retrying would not help — but are logged as errors for
+        manual reconciliation. Genuine server errors return 5xx so SePay retries.
+      tags: [Payments]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, transferType, transferAmount]
+              properties:
+                id:
+                  type: number
+                  description: SePay transaction id
+                gateway:
+                  type: string
+                  example: Vietcombank
+                transactionDate:
+                  type: string
+                accountNumber:
+                  type: string
+                code:
+                  type: string
+                  nullable: true
+                  description: Payment code SePay extracted (if a pattern is configured)
+                content:
+                  type: string
+                  description: Raw transfer content — the booking code is parsed out of this
+                  example: 'CT DEN:0011 BKMRJ0NXGQ341D22'
+                transferType:
+                  type: string
+                  enum: [in, out]
+                transferAmount:
+                  type: number
+                referenceCode:
+                  type: string
+      responses:
+        '200':
+          description: Webhook accepted (SePay requires success=true, otherwise it retries)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Thanh toán thành công
+        '401':
+          description: Missing or wrong API key
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: false }
+                  message: { type: string, example: Invalid API key }
+
+  /payments/vnpay/return:
+    get:
+      summary: VNPay browser return URL (public)
+      description: >
+        VNPay redirects the user's browser here after payment. The signature (vnp_SecureHash)
+        is verified server-side; on success the booking is confirmed, commission recorded and an
+        e-voucher issued. The endpoint then 302-redirects to the client payment-result page.
+      tags: [Payments]
+      parameters:
+        - in: query
+          name: vnp_TxnRef
+          schema:
+            type: string
+        - in: query
+          name: vnp_ResponseCode
+          schema:
+            type: string
+        - in: query
+          name: vnp_SecureHash
+          schema:
+            type: string
+      responses:
+        '302':
+          description: Redirect to client payment-result page
+
+  /payments/vnpay/ipn:
+    get:
+      summary: VNPay IPN endpoint (server-to-server, public)
+      description: >
+        VNPay calls this server-to-server to confirm the transaction outcome. Same verification and
+        confirmation logic as the return URL, but responds with the VNPay JSON contract
+        ({ RspCode, Message }). Idempotent on repeated calls.
+      tags: [Payments]
+      responses:
+        '200':
+          description: VNPay acknowledgement
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  RspCode:
+                    type: string
+                    example: '00'
+                  Message:
+                    type: string
+                    example: Thanh toán thành công
+
+  /reviews:
+    post:
+      summary: Submit a review after checkout
+      description: >
+        A guest who completed a stay submits a review for their booking. Only the booking owner can
+        review, the booking must be checked_out, and each booking can be reviewed once. hotelId is taken
+        from the booking (not the client). Ratings are 1–5. Image URLs (uploaded via POST /uploads) are
+        optional. The review is published immediately (the guest's stay is a verified purchase).
+      tags: [Reviews]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateReviewRequest'
+      responses:
+        '201':
+          description: Review created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Review'
+        '400':
+          description: Not checked out yet, or already reviewed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    get:
+      summary: List a hotel's public reviews
+      description: Public, paginated list of a hotel's published reviews (newest first).
+      tags: [Reviews]
+      parameters:
+        - in: query
+          name: hotelId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: limit
+          schema:
+            type: integer
+        - in: query
+          name: page
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Paginated reviews
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaginatedReviews' }
+
+  /reviews/me:
+    get:
+      summary: List the current user's own reviews
+      description: >
+        Paginated list of reviews written by the authenticated user (newest first), across ALL hotels
+        and ALL statuses (including pending/hidden — these are the user's own). Each item includes the
+        hotel name, booking code, images, manager response and status. Replaces the client-side workaround
+        of fetching each hotel's public reviews and filtering by customerId.
+      tags: [Reviews]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: sortBy
+          schema:
+            type: string
+          description: 'field:asc|desc, e.g. createdAt:desc'
+        - in: query
+          name: limit
+          schema:
+            type: integer
+        - in: query
+          name: page
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Paginated reviews of the current user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaginatedReviews' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /reviews/{reviewId}:
+    get:
+      summary: Get one public review
+      tags: [Reviews]
+      parameters:
+        - in: path
+          name: reviewId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The review
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Review'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      summary: Update my own review
+      description: >
+        The review's author edits their own review. Only the owner can update it. Ratings, title,
+        content and images are editable (all fields optional, at least one required); bookingId,
+        hotelId and status cannot be changed. Sending `images` (even an empty array) replaces the
+        whole image set with the new list.
+      tags: [Reviews]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: reviewId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateReviewRequest'
+      responses:
+        '200':
+          description: Updated review
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Review'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      summary: Delete my own review
+      description: >
+        The review's author deletes their own review. Only the owner can delete it. Attached images
+        are removed automatically (cascade).
+      tags: [Reviews]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: reviewId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Review deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /hotels/{hotelId}/bookings:
+    get:
+      summary: List a hotel's bookings (staff/owner)
+      description: >
+        Owner, platform manager, or assigned staff lists bookings of the hotel, filtered by status
+        and check-in date range. Each item includes customer, assigned rooms and voucher info.
+      tags: [Bookings]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [pending, confirmed, checked_in, checked_out, cancelled, no_show]
+        - in: query
+          name: fromDate
+          schema:
+            type: string
+            format: date
+        - in: query
+          name: toDate
+          schema:
+            type: string
+            format: date
+        - in: query
+          name: limit
+          schema:
+            type: integer
+        - in: query
+          name: page
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Paginated bookings
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaginatedStaffBookings' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /hotels/{hotelId}/bookings/lookup:
+    get:
+      summary: Look up a booking by voucher code (staff QR scan)
+      description: >
+        Staff scans the guest QR / enters the e-voucher code to fetch the matching booking before
+        check-in. Looks up by voucher_code and confirms the booking belongs to this hotel. Returns the
+        booking with customer, assigned rooms and voucher info (same shape as the staff booking view).
+      tags: [Bookings]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: voucherCode
+          required: true
+          schema:
+            type: string
+          description: The e-voucher code from the booking QR
+      responses:
+        '200':
+          description: The matching booking
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StaffBooking' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /hotels/{hotelId}/bookings/{bookingId}/check-in:
+    post:
+      summary: Check in a confirmed booking (staff)
+      description: >
+        Moves a confirmed (paid) booking to checked_in, assigns one available physical room of the
+        booking's room type (or the room given by roomId), marks the e-voucher used. Optionally
+        verifies the scanned voucherCode. Only allowed within the stay window
+        (checkInDate <= today < checkOutDate) — too early or past the stay is rejected.
+      tags: [Bookings]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: path
+          name: bookingId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                roomId:
+                  type: string
+                  format: uuid
+                  description: Optional specific physical room to assign
+                voucherCode:
+                  type: string
+                  description: Optional e-voucher code to verify at the desk
+      responses:
+        '200':
+          description: Booking checked in (with assigned room)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StaffBooking' }
+        '400':
+          description: Not confirmed, voucher mismatch, or no free room
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /hotels/{hotelId}/bookings/{bookingId}/check-out:
+    post:
+      summary: Check out a staying booking and issue an invoice (staff)
+      description: >
+        Moves a checked_in booking to checked_out, frees the assigned room(s) to cleaning status,
+        and issues an Invoice (room subtotal + optional extra charge).
+      tags: [Bookings]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: path
+          name: bookingId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                extraCharge:
+                  type: number
+                  minimum: 0
+                  description: Extra charges incurred during the stay (added to the invoice total)
+      responses:
+        '200':
+          description: Booking checked out (response includes the issued invoice)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StaffBooking' }
+        '400':
+          description: Booking is not currently checked in
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /hotels/{hotelId}/bookings/{bookingId}/no-show:
+    post:
+      summary: Mark a booking as no-show (staff)
+      description: >
+        Staff marks a confirmed booking whose check-in date has passed as no_show (guest never
+        arrived). Prepaid (VNPay) bookings are forfeited — no refund, commission kept. A still-pending
+        cash payment is marked failed. Inventory is not released.
+      tags: [Bookings]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: path
+          name: bookingId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Booking marked no_show
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StaffBooking' }
+        '400':
+          description: Not confirmed, or check-in date not reached yet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /hotels/{hotelId}/bookings/{bookingId}/record-cash-payment:
+    post:
+      summary: Record cash received for a pay-at-hotel booking (staff)
+      description: >
+        Staff marks the pending cash Payment of a "pay at hotel" booking as completed (money collected
+        at the desk) and records the platform commission at that point. Idempotent — a second call on
+        an already-collected booking is rejected.
+      tags: [Bookings]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: path
+          name: bookingId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Cash payment recorded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StaffBooking' }
+        '400':
+          description: No pending cash payment, or booking cancelled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /hotels/{hotelId}/bookings/{bookingId}:
+    get:
+      summary: Get one booking of a hotel (staff)
+      description: >
+        Owner, manager, or assigned staff fetches a single booking's detail (customer, assigned rooms,
+        voucher, payments, and the invoice if already issued).
+      tags: [Bookings]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: path
+          name: bookingId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Booking detail
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StaffBooking' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /hotels/{hotelId}/rooms/{roomId}/status:
+    patch:
+      summary: Update a room's status (staff room map / housekeeping)
+      description: >
+        Assigned staff (or owner/manager) quickly changes a room's operational status
+        (available / occupied / maintenance / cleaning) — used by the room map and housekeeping.
+      tags: [HotelManagement]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: path
+          name: roomId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - status
+              properties:
+                status:
+                  type: string
+                  enum: [available, occupied, maintenance, cleaning]
+      responses:
+        '200':
+          description: Room status updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Room' }
+        '400':
+          description: Invalid status
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /hotels/{hotelId}/housekeeping:
+    get:
+      summary: List housekeeping tasks (staff)
+      description: >
+        Assigned staff lists the hotel's housekeeping (room cleaning) tasks, optionally filtered by
+        status. Tasks are auto-created when a booking checks out.
+      tags: [HotelManagement]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [pending, in_progress, done]
+      responses:
+        '200':
+          description: Housekeeping tasks (each with its room)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/HousekeepingTask' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /hotels/{hotelId}/housekeeping/{taskId}/complete:
+    post:
+      summary: Complete a housekeeping task (staff, 1-tap)
+      description: >
+        Marks a cleaning task done and returns the room to "available" (only if it is still in
+        "cleaning"). Rejected if the task is already done.
+      tags: [HotelManagement]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: path
+          name: taskId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Task completed, room freed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HousekeepingTask' }
+        '400':
+          description: Task already done
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /hotels/{hotelId}/conversations:
+    get:
+      summary: List a hotel's chat conversations (staff inbox, S04)
+      description: >
+        Owner, manager, or assigned staff lists the hotel's chat conversations, filtered by status
+        (the inbox typically uses status=escalated to see chats the bot handed off). Each item includes
+        the customer, a preview of the last message, the assignee and lastMessageAt.
+      tags: [HotelManagement]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [active, resolved, escalated, closed]
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        - in: query
+          name: page
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Paginated conversations
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaginatedConversations' }
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+
+  /hotels/{hotelId}/conversations/{conversationId}:
+    get:
+      summary: Get a conversation with all messages (staff)
+      description: >
+        Owner/manager/assigned staff views one conversation thread (all messages, oldest first) plus
+        customer info.
+      tags: [HotelManagement]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: path
+          name: conversationId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Conversation with messages
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Conversation' }
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+
+  /hotels/{hotelId}/conversations/{conversationId}/reply:
+    post:
+      summary: Staff replies to a conversation (S04)
+      description: >
+        Saves a staff reply, assigns the conversation to the replying staff, and moves its status to
+        "active" (taking it out of the escalated queue). Rejected if the conversation is closed.
+      tags: [HotelManagement]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: path
+          name: conversationId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - message
+              properties:
+                message:
+                  type: string
+                  maxLength: 2000
+              example:
+                message: Chào anh/chị, em là lễ tân, em hỗ trợ mình ngay ạ.
+      responses:
+        "201":
+          description: Staff message saved
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Message' }
+        "400":
+          description: Conversation already closed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+
+  /hotels/{hotelId}/conversations/{conversationId}/resolve:
+    post:
+      summary: Mark a conversation resolved (S04)
+      description: >
+        Owner/manager/assigned staff marks the conversation handled (status=resolved, resolvedAt set).
+      tags: [HotelManagement]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: path
+          name: conversationId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Conversation resolved
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Conversation' }
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+
+  /hotels/{hotelId}/staff:
+    get:
+      summary: List staff assigned to a hotel (owner)
+      description: Hotel owner or manageHotels lists active staff assignments (with user info).
+      tags: [HotelManagement]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Active staff assignments
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/StaffAssignment' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      summary: Add a staff to a hotel — create new OR re-assign existing (owner)
+      description: >
+        Hotel owner or manageHotels. Behavior depends on the email:
+        (1) email has NO account yet → creates a new active staff account (name + password required, no OTP —
+        the owner vouches) and assigns it; (2) email already belongs to a staff account → RE-ASSIGNS it to
+        this hotel (name/password ignored). Rule "1 staff = 1 hotel": re-assigning a staff who is currently
+        active at ANY hotel is rejected (400). assignedRole ("staff") is the user's global role.
+      tags: [HotelManagement]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+              properties:
+                email:
+                  type: string
+                  format: email
+                name:
+                  type: string
+                  description: Required when creating a NEW account; ignored on re-assign
+                password:
+                  type: string
+                  description: Required when creating a NEW account (min 8, at least 1 letter and 1 number); ignored on re-assign
+                phone:
+                  type: string
+                assignedRole:
+                  type: string
+                  enum: [staff]
+                  default: staff
+      responses:
+        '201':
+          description: Staff created or re-assigned (user without passwordHash + assignment + reassigned flag)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: { $ref: '#/components/schemas/MeProfile' }
+                  assignment: { $ref: '#/components/schemas/StaffAssignment' }
+                  reassigned: { type: boolean, description: true if an existing account was re-assigned instead of created }
+        '400':
+          description: >
+            Email belongs to a non-staff account, staff already active at a hotel (1-staff-1-hotel),
+            or missing name/password when creating a new account
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /hotels/{hotelId}/staff/{userId}:
+    get:
+      summary: Get a staff member's detail (owner)
+      description: Hotel owner or manageHotels views one assigned staff member's detail (user info + assignment).
+      tags: [HotelManagement]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: path
+          name: userId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Staff assignment detail (with user info)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StaffAssignmentDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      summary: Unassign a staff member from the hotel (owner)
+      description: >
+        Ends a staff member's assignment (sets unassignedAt) so they lose access to the hotel's
+        operations. The user account itself is not deleted.
+      tags: [HotelManagement]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: path
+          name: userId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Staff unassigned
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StaffAssignment' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No active assignment for this staff at the hotel
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /hotels/{hotelId}/reviews:
+    get:
+      summary: List reviews of my hotel (partner)
+      description: >
+        Hotel owner or manageHotels lists reviews of THEIR hotel — unlike the public GET /reviews this
+        returns ALL statuses (pending/published/hidden) and can be filtered by status. Paginated.
+      tags: [HotelManagement]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: query
+          name: status
+          schema: { type: string, enum: [pending, published, hidden] }
+        - in: query
+          name: sortBy
+          schema: { type: string }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100 }
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: Paginated reviews of the hotel
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaginatedReviews' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /hotels/{hotelId}/reviews/stats:
+    get:
+      summary: Get review stats of my hotel (partner)
+      description: >
+        Hotel owner or manageHotels gets aggregate review stats (total, average per category, star
+        distribution) computed over the hotel's published reviews.
+      tags: [HotelManagement]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Aggregate review stats
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReviewStats' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /hotels/{hotelId}/room-types/manage:
+    get:
+      summary: List room types for management (includes inactive)
+      description: Hotel owner or manageHotels. Each item includes images, amenities and physical room count.
+      tags: [HotelManagement]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Room types (active + inactive) with images, amenities and room count
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/RoomType' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /hotels/{hotelId}/room-types/create:
+    post:
+      summary: Create a room type (actual path is POST /hotels/{hotelId}/room-types)
+      description: >
+        Hotel owner or manageHotels. NOTE - the real path is POST /hotels/{hotelId}/room-types
+        (documented here separately because the GET on that path is the public search).
+      tags: [HotelManagement]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, maxOccupancy, basePrice]
+              properties:
+                name: { type: string }
+                description: { type: string }
+                maxOccupancy: { type: integer, minimum: 1, maximum: 20 }
+                basePrice: { type: number, minimum: 0 }
+                areaSqm: { type: number }
+                bedType: { type: string }
+                viewType: { type: string }
+                isActive: { type: boolean, default: true }
+                maxAdults: { type: integer, minimum: 0, maximum: 20 }
+                maxChildren: { type: integer, minimum: 0, maximum: 20 }
+                sizeUnit: { type: string, enum: [sqm, sqft] }
+                isNonSmoking: { type: boolean }
+                hasPrivateBathroom: { type: boolean }
+                hasBalcony: { type: boolean }
+              example:
+                name: Phòng Deluxe Twin
+                maxOccupancy: 3
+                basePrice: 1200000
+                bedType: twin
+                viewType: city
+      responses:
+        '201':
+          description: Created room type
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoomType' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /hotels/{hotelId}/room-types/{roomTypeId}:
+    get:
+      summary: Get one room type detail (guest)
+      description: >
+        Public. Returns full detail of a single active room type belonging to a listed hotel
+        (hotel isActive + isListed) — images, amenities, beds and minimal hotel info. When
+        checkIn/checkOut are provided the response also includes numNights, availableRooms and
+        totalPrice for the stay (per-night priceOverride applied). Returns 404 if the room type
+        is hidden or belongs to a hotel that is not on sale.
+      tags: [Hotels]
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: path
+          name: roomTypeId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: query
+          name: checkIn
+          schema: { type: string, format: date }
+        - in: query
+          name: checkOut
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: Room type detail (plus availability and total price when dates given)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoomType' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      summary: Update a room type
+      description: Hotel owner or manageHotels. All fields optional; set isActive=false to stop selling.
+      tags: [HotelManagement]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: path
+          name: roomTypeId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                description: { type: string }
+                maxOccupancy: { type: integer }
+                basePrice: { type: number }
+                areaSqm: { type: number }
+                bedType: { type: string }
+                viewType: { type: string }
+                isActive: { type: boolean }
+                maxAdults: { type: integer, minimum: 0, maximum: 20 }
+                maxChildren: { type: integer, minimum: 0, maximum: 20 }
+                sizeUnit: { type: string, enum: [sqm, sqft] }
+                isNonSmoking: { type: boolean }
+                hasPrivateBathroom: { type: boolean }
+                hasBalcony: { type: boolean }
+      responses:
+        '200':
+          description: Updated room type
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoomType' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      summary: Delete a room type (only if unused)
+      description: >
+        Hotel owner or manageHotels. Allowed only when the room type has no rooms and no bookings;
+        otherwise 400 — disable it via PUT with isActive=false instead.
+      tags: [HotelManagement]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: path
+          name: roomTypeId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Deleted }
+        '400':
+          description: Room type has rooms or bookings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /hotels/{hotelId}/room-types/{roomTypeId}/images:
+    post:
+      summary: Add images to a room type
+      description: >
+        URLs must be uploaded via POST /uploads first. If any new image has isPrimary=true,
+        the previous primary flag is cleared so there is always at most one primary image.
+      tags: [HotelManagement]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: path
+          name: roomTypeId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [images]
+              properties:
+                images:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    required: [url]
+                    properties:
+                      url: { type: string, format: uri }
+                      isPrimary: { type: boolean }
+                      sortOrder: { type: integer }
+      responses:
+        '201':
+          description: Full image list of the room type
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/RoomTypeImage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /hotels/{hotelId}/contacts:
+    get:
+      summary: List hotel contacts (management)
+      description: Hotel owner or manageHotels.
+      tags: [HotelManagement]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: hotelId, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Hotel contacts
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/HotelContact' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      summary: Replace all hotel contacts (management)
+      description: Hotel owner or manageHotels. Replaces the whole set; an empty array clears all.
+      tags: [HotelManagement]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: hotelId, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [contacts]
+              properties:
+                contacts:
+                  type: array
+                  items:
+                    type: object
+                    required: [contactType]
+                    properties:
+                      contactType: { type: string, enum: [physical_location, general, availability, invoices] }
+                      name: { type: string, nullable: true }
+                      jobTitle: { type: string, nullable: true }
+                      email: { type: string, format: email, nullable: true }
+                      phone: { type: string, nullable: true }
+                      phoneType: { type: string, enum: [voice, fax, mobile], nullable: true }
+      responses:
+        '200':
+          description: Hotel contacts after replace
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/HotelContact' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /hotels/{hotelId}/policies:
+    get:
+      summary: List hotel policies / fees (management)
+      description: Hotel owner or manageHotels.
+      tags: [HotelManagement]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: hotelId, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Hotel policies
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/HotelPolicy' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      summary: Replace all hotel policies / fees (management)
+      description: Hotel owner or manageHotels. Replaces the whole set; an empty array clears all.
+      tags: [HotelManagement]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: hotelId, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [policies]
+              properties:
+                policies:
+                  type: array
+                  items:
+                    type: object
+                    required: [policyType]
+                    properties:
+                      policyType: { type: string, enum: [cancellation, tax, fee, parking, internet, deposit] }
+                      code: { type: string, nullable: true }
+                      description: { type: string, nullable: true }
+                      amount: { type: number, minimum: 0, nullable: true }
+                      isPercentage: { type: boolean }
+                      chargeFrequency: { type: string, enum: [per_stay, per_night, per_person, per_person_per_night], nullable: true }
+                      minAge: { type: integer, minimum: 0, maximum: 120, nullable: true }
+                      maxAge: { type: integer, minimum: 0, maximum: 120, nullable: true }
+      responses:
+        '200':
+          description: Hotel policies after replace
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/HotelPolicy' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /hotels/{hotelId}/nearby-places:
+    get:
+      summary: List hotel nearby places (management)
+      description: Hotel owner or manageHotels.
+      tags: [HotelManagement]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: hotelId, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Hotel nearby places
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/HotelNearbyPlace' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      summary: Replace all hotel nearby places (management)
+      description: Hotel owner or manageHotels. Replaces the whole set; an empty array clears all.
+      tags: [HotelManagement]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: hotelId, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nearbyPlaces]
+              properties:
+                nearbyPlaces:
+                  type: array
+                  items:
+                    type: object
+                    required: [name, category, distance, distanceUnit]
+                    properties:
+                      name: { type: string }
+                      category: { type: string, enum: [attraction, beach, airport, restaurant, public_transport, landmark, nature] }
+                      distance: { type: number, minimum: 0 }
+                      distanceUnit: { type: string, enum: [km, miles] }
+                      transportType: { type: string, enum: [walk, car, public_transport, taxi, shuttle], nullable: true }
+                      journeyMinutes: { type: integer, minimum: 0, nullable: true }
+      responses:
+        '200':
+          description: Hotel nearby places after replace
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/HotelNearbyPlace' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /hotels/{hotelId}/amenities:
+    get:
+      summary: List hotel amenities (management)
+      description: Hotel owner or manageHotels. Returns amenities assigned to the hotel with catalog info.
+      tags: [HotelManagement]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: List of assigned hotel amenities (each with isFree/quantity + catalog amenity)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/HotelAmenity' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      summary: Set hotel amenities (replace all)
+      description: >
+        Hotel owner or manageHotels. The sent list REPLACES the current hotel amenity set; an empty
+        array clears all. Each item may carry isFree (default true) and quantity.
+      tags: [HotelManagement]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amenities]
+              properties:
+                amenities:
+                  type: array
+                  items: { $ref: '#/components/schemas/AmenityAssignment' }
+      responses:
+        '200':
+          description: List of assigned hotel amenities after replace
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/HotelAmenity' }
+        '400': { description: Some amenity ids do not exist }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /hotels/{hotelId}/room-types/{roomTypeId}/beds:
+    get:
+      summary: List a room type's bed configuration (management)
+      description: Hotel owner or manageHotels.
+      tags: [HotelManagement]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: hotelId, required: true, schema: { type: string, format: uuid } }
+        - { in: path, name: roomTypeId, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Bed configuration
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/RoomBed' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      summary: Replace a room type's bed configuration (management)
+      description: Hotel owner or manageHotels. Replaces the whole set; an empty array clears all.
+      tags: [HotelManagement]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: hotelId, required: true, schema: { type: string, format: uuid } }
+        - { in: path, name: roomTypeId, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [beds]
+              properties:
+                beds:
+                  type: array
+                  items:
+                    type: object
+                    required: [bedType]
+                    properties:
+                      bedType: { type: string, enum: [single, double, queen, king, sofa_bed, bunk] }
+                      quantity: { type: integer, minimum: 1, maximum: 20, default: 1 }
+      responses:
+        '200':
+          description: Bed configuration after replace
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/RoomBed' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /hotels/{hotelId}/room-types/{roomTypeId}/amenities:
+    put:
+      summary: Set room type amenities (replace all, N-N)
+      description: >
+        The sent list REPLACES the current amenity set; an empty array clears all amenities.
+        Each item may carry isFree (default true) and quantity.
+      tags: [HotelManagement]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: path
+          name: roomTypeId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amenities]
+              properties:
+                amenities:
+                  type: array
+                  items: { $ref: '#/components/schemas/AmenityAssignment' }
+      responses:
+        '200':
+          description: Room type with the new amenity set
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoomType' }
+        '400': { description: Some amenity ids do not exist }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /hotels/{hotelId}/rooms:
+    post:
+      summary: Create a physical room
+      description: >
+        Room number must be unique within the hotel. Future room_availability rows of the
+        room type get totalRooms incremented so already-priced nights sell the new room too.
+      tags: [HotelManagement]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [roomTypeId, roomNumber]
+              properties:
+                roomTypeId: { type: string, format: uuid }
+                roomNumber: { type: string }
+                floor: { type: integer }
+                status: { type: string, enum: [available, occupied, maintenance, cleaning], default: available }
+                notes: { type: string }
+      responses:
+        '201':
+          description: Created room
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Room' }
+        '400': { description: Duplicate room number }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    get:
+      summary: List physical rooms (filter by status, room type)
+      tags: [HotelManagement]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: query
+          name: status
+          schema: { type: string, enum: [available, occupied, maintenance, cleaning] }
+        - in: query
+          name: roomTypeId
+          schema: { type: string, format: uuid }
+        - in: query
+          name: sortBy
+          schema: { type: string }
+        - in: query
+          name: limit
+          schema: { type: integer }
+        - in: query
+          name: page
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Paginated room list
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaginatedRooms' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /hotels/{hotelId}/rooms/{roomId}:
+    put:
+      summary: Update a room (status, number, floor, notes)
+      tags: [HotelManagement]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: path
+          name: roomId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                roomNumber: { type: string }
+                floor: { type: integer }
+                status: { type: string, enum: [available, occupied, maintenance, cleaning] }
+                notes: { type: string }
+              example:
+                status: maintenance
+                notes: Hỏng điều hoà, chờ linh kiện
+      responses:
+        '200':
+          description: Updated room
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Room' }
+        '400': { description: Duplicate room number }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      summary: Delete a room (only if never booked)
+      description: >
+        Hotel owner or manageHotels. Allowed only when the room has no booking history; otherwise 400 —
+        set status=maintenance instead. Future inventory (room_availability.totalRooms) is decremented.
+      tags: [HotelManagement]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: path
+          name: roomId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Deleted }
+        '400':
+          description: Room has booking history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /hotels/{hotelId}/pricing-rules:
+    post:
+      summary: Create a pricing rule
+      description: >
+        roomTypeId null/omitted = rule applies to the whole hotel. Matching nights get the
+        highest-priority rule applied on top of (priceOverride ?? basePrice). early_bird rules
+        match when TODAY (booking time) is inside [startDate, endDate]; other types match the
+        stay night. occupancy rules require occupancyThreshold (% booked) and fire when the
+        night's occupancy reaches it. adjustmentValue can be negative (discount).
+      tags: [HotelManagement]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, ruleType, startDate, endDate, adjustmentType, adjustmentValue]
+              properties:
+                roomTypeId: { type: string, format: uuid, nullable: true }
+                name: { type: string }
+                ruleType: { type: string, enum: [seasonal, weekend, occupancy, early_bird] }
+                startDate: { type: string, format: date }
+                endDate: { type: string, format: date }
+                dayOfWeek:
+                  type: array
+                  items: { type: integer, minimum: 0, maximum: 6 }
+                  description: 0=Sunday..6=Saturday; empty = every day
+                occupancyThreshold: { type: integer, minimum: 1, maximum: 100 }
+                adjustmentType: { type: string, enum: [percentage, fixed] }
+                adjustmentValue: { type: number, description: negative = discount }
+                priority: { type: integer, default: 0 }
+                isActive: { type: boolean, default: true }
+              example:
+                name: Phụ thu cuối tuần
+                ruleType: weekend
+                startDate: '2026-06-01'
+                endDate: '2026-08-31'
+                dayOfWeek: [5, 6]
+                adjustmentType: percentage
+                adjustmentValue: 20
+                priority: 10
+      responses:
+        '201':
+          description: Created pricing rule
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PricingRule' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    get:
+      summary: List pricing rules of a hotel
+      tags: [HotelManagement]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: query
+          name: roomTypeId
+          schema: { type: string, format: uuid }
+        - in: query
+          name: isActive
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: Rules ordered by priority desc
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PricingRule' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /hotels/{hotelId}/pricing-rules/{ruleId}:
+    put:
+      summary: Update a pricing rule
+      tags: [HotelManagement]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: path
+          name: ruleId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Any subset of the create fields
+      responses:
+        '200':
+          description: Updated pricing rule
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PricingRule' }
+        '400': { description: endDate before startDate after merge }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      summary: Delete a pricing rule
+      tags: [HotelManagement]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: hotelId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: path
+          name: ruleId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Deleted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /amenities:
+    get:
+      summary: List all amenities
+      description: Public. Optional category filter (room/hotel/service).
+      tags: [Amenities]
+      parameters:
+        - in: query
+          name: category
+          schema: { type: string, enum: [room, hotel, service] }
+      responses:
+        '200':
+          description: Amenity catalog list
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Amenity' }
+    post:
+      summary: Create an amenity (partner or admin)
+      description: >
+        Requires the manageAmenities right (hotel_partner or admin). Name is globally unique and
+        compared case-insensitively (trimmed) to keep the shared catalog free of near-duplicates.
+      tags: [Amenities]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, category]
+              properties:
+                name: { type: string }
+                icon: { type: string }
+                category: { type: string, enum: [room, hotel, service] }
+              example:
+                name: Máy pha cà phê
+                icon: coffee
+                category: room
+      responses:
+        '201':
+          description: Created amenity
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Amenity' }
+        '400': { description: Duplicate name }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /hotel-partners/documents/{documentId}/replace:
+    post:
+      summary: Re-upload a rejected document (owner)
+      description: The partner who owns the document submits a new file URL; a new pending document is created and the old one is marked replaced.
+      tags: [HotelPartners]
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: documentId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - fileUrl
+              properties:
+                fileUrl:
+                  type: string
+                  format: uri
+      responses:
+        '201':
+          description: Replacement document created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HotelVerificationDocument'
+        '400':
+          description: Document is not in a rejected state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
