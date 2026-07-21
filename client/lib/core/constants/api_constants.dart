@@ -59,6 +59,9 @@ class ApiConstants {
   static const String reviews = '/reviews'; // POST tạo đánh giá
   static const String myReviews = '/reviews/me'; // GET đánh giá của tôi
 
+  // ---- Upload ----
+  static const String uploads = '/uploads'; // POST 1 file (field "file") → { url }
+
   // ---- Hồ sơ người dùng ----
   /// GET: lấy hồ sơ (kèm `profile`) — PATCH: cập nhật hồ sơ.
   static const String me = '/users/me';

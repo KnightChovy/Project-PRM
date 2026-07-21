@@ -4,6 +4,7 @@ import 'package:smart_stay_ai/core/utils/safe_notifier.dart';
 import 'package:smart_stay_ai/features/review/domain/entities/review.dart';
 import 'package:smart_stay_ai/features/review/domain/usecases/get_my_reviews.dart';
 import 'package:smart_stay_ai/features/review/domain/usecases/submit_review.dart';
+import 'package:smart_stay_ai/features/review/domain/usecases/upload_review_image.dart';
 
 enum ReviewStatus { initial, submitting, success, error }
 
@@ -12,7 +13,8 @@ enum ReviewStatus { initial, submitting, success, error }
 class ReviewNotifier extends ChangeNotifier with SafeNotifier {
   final SubmitReview submitReview;
   final GetMyReviews getMyReviews;
-  ReviewNotifier(this.submitReview, this.getMyReviews);
+  final UploadReviewImage uploadReviewImage;
+  ReviewNotifier(this.submitReview, this.getMyReviews, this.uploadReviewImage);
 
   ReviewStatus status = ReviewStatus.initial;
   Review? submitted;
@@ -40,12 +42,36 @@ class ReviewNotifier extends ChangeNotifier with SafeNotifier {
   }
 
   /// Gửi đánh giá. Trả về true nếu thành công (để widget điều hướng/snackbar).
-  Future<bool> submit(SubmitReviewParams params) async {
+  ///
+  /// [photos] (nếu có) được tải lên `/uploads` TRƯỚC, rồi đính URL vào đánh giá.
+  /// Ảnh nào tải lỗi thì dừng luôn, không gửi đánh giá thiếu ảnh.
+  Future<bool> submit(
+    SubmitReviewParams params, {
+    List<UploadReviewImageParams> photos = const [],
+  }) async {
     status = ReviewStatus.submitting;
     errorMessage = null;
     safeNotifyListeners();
 
-    final result = await submitReview(params);
+    final urls = <String>[];
+    for (final photo in photos) {
+      final uploaded = await uploadReviewImage(photo);
+      final failed = uploaded.fold(
+        (failure) {
+          status = ReviewStatus.error;
+          errorMessage = failure.message;
+          safeNotifyListeners();
+          return true;
+        },
+        (url) {
+          urls.add(url);
+          return false;
+        },
+      );
+      if (failed) return false;
+    }
+
+    final result = await submitReview(params.copyWith(images: urls));
     return result.fold(
       (failure) {
         status = ReviewStatus.error;

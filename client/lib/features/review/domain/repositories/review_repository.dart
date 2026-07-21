@@ -16,10 +16,17 @@ abstract interface class ReviewRepository {
     required int value,
     required String comment,
     String? title,
+    List<String> images,
   });
 
   /// Lấy toàn bộ đánh giá đã gửi (để kiểm tra đã đánh giá chỗ nào, xem lại).
   Future<Either<Failure, List<Review>>> getMyReviews();
+
+  /// Tải một ảnh (bytes) lên `/uploads`, trả về URL để đính vào đánh giá.
+  Future<Either<Failure, String>> uploadImage({
+    required List<int> bytes,
+    required String filename,
+  });
 
   /// Đánh giá công khai của một khách sạn (màn Guest Reviews).
   Future<Either<Failure, List<HotelReview>>> getHotelReviews(String hotelId);

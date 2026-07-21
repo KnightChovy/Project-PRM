@@ -22,6 +22,7 @@ class ReviewRepositoryImpl implements ReviewRepository {
     required int value,
     required String comment,
     String? title,
+    List<String> images = const [],
   }) {
     return guardApiCall(() => remote.submit(
           bookingId: bookingId,
@@ -32,7 +33,18 @@ class ReviewRepositoryImpl implements ReviewRepository {
           value: value,
           comment: comment,
           title: title,
+          images: images,
         ));
+  }
+
+  @override
+  Future<Either<Failure, String>> uploadImage({
+    required List<int> bytes,
+    required String filename,
+  }) {
+    return guardApiCall(
+      () => remote.uploadImage(bytes: bytes, filename: filename),
+    );
   }
 
   @override

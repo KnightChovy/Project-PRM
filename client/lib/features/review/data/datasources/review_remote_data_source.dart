@@ -18,12 +18,19 @@ abstract interface class ReviewRemoteDataSource {
     required int value,
     required String comment,
     String? title,
+    List<String> images,
   });
 
   Future<List<ReviewModel>> getMyReviews();
 
   /// Đánh giá công khai của một khách sạn.
   Future<List<HotelReviewModel>> getHotelReviews(String hotelId);
+
+  /// Tải 1 ảnh (bytes) lên `/uploads`, trả về URL Cloudinary.
+  Future<String> uploadImage({
+    required List<int> bytes,
+    required String filename,
+  });
 }
 
 class ReviewRemoteDataSourceImpl implements ReviewRemoteDataSource {
@@ -40,6 +47,7 @@ class ReviewRemoteDataSourceImpl implements ReviewRemoteDataSource {
     required int value,
     required String comment,
     String? title,
+    List<String> images = const [],
   }) async {
     try {
       // Server tự lấy hotelId từ booking → chỉ gửi bookingId + điểm + nội dung.
@@ -54,11 +62,37 @@ class ReviewRemoteDataSourceImpl implements ReviewRemoteDataSource {
           'valueRating': value,
           'content': comment,
           if (title != null && title.trim().isNotEmpty) 'title': title.trim(),
+          if (images.isNotEmpty) 'images': images,
         },
       );
       return ReviewModel.fromJson(_asMap(res.data));
     } on DioException catch (e) {
       throwApiException(e, fallback: 'Gửi đánh giá thất bại');
+    }
+  }
+
+  @override
+  Future<String> uploadImage({
+    required List<int> bytes,
+    required String filename,
+  }) async {
+    try {
+      final form = FormData.fromMap({
+        // Field PHẢI tên "file" (multer.single('file')); folder gom ảnh review.
+        'file': MultipartFile.fromBytes(bytes, filename: filename),
+      });
+      final res = await client.dio.post(
+        ApiConstants.uploads,
+        queryParameters: {'folder': 'reviews'},
+        data: form,
+      );
+      final url = _asMap(res.data)['url'];
+      if (url is! String || url.isEmpty) {
+        throw const ServerException(message: 'Tải ảnh lên thất bại');
+      }
+      return url;
+    } on DioException catch (e) {
+      throwApiException(e, fallback: 'Tải ảnh lên thất bại');
     }
   }
 

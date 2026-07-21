@@ -34,6 +34,7 @@ import 'package:smart_stay_ai/features/review/domain/repositories/review_reposit
 import 'package:smart_stay_ai/features/review/domain/usecases/submit_review.dart';
 import 'package:smart_stay_ai/features/review/domain/usecases/get_my_reviews.dart';
 import 'package:smart_stay_ai/features/review/domain/usecases/get_hotel_reviews.dart';
+import 'package:smart_stay_ai/features/review/domain/usecases/upload_review_image.dart';
 import 'package:smart_stay_ai/features/review/presentation/providers/review_notifier.dart';
 import 'package:smart_stay_ai/features/review/presentation/providers/hotel_reviews_notifier.dart';
 import 'package:smart_stay_ai/features/assistant/data/datasources/assistant_remote_data_source.dart';
@@ -175,7 +176,8 @@ Future<void> initDependencies() async {
   sl.registerLazySingleton(() => SubmitReview(sl()));
   sl.registerLazySingleton(() => GetMyReviews(sl()));
   sl.registerLazySingleton(() => GetHotelReviews(sl()));
-  sl.registerFactory(() => ReviewNotifier(sl(), sl()));
+  sl.registerLazySingleton(() => UploadReviewImage(sl()));
+  sl.registerFactory(() => ReviewNotifier(sl(), sl(), sl()));
   // Factory: mỗi khách sạn một phiên xem đánh giá riêng.
   sl.registerFactory(() => HotelReviewsNotifier(sl()));
 

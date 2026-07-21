@@ -20,6 +20,7 @@ class _FakeReviewRepository implements ReviewRepository {
     required int value,
     required String comment,
     String? title,
+    List<String> images = const [],
   }) async {
     called = true;
     return Right(Review(
@@ -47,6 +48,13 @@ class _FakeReviewRepository implements ReviewRepository {
     String hotelId,
   ) async =>
       const Right([]);
+
+  @override
+  Future<Either<Failure, String>> uploadImage({
+    required List<int> bytes,
+    required String filename,
+  }) async =>
+      const Right('https://cdn.test/img.jpg');
 }
 
 SubmitReviewParams _params({required int overall}) => SubmitReviewParams(

@@ -29,6 +29,7 @@ class SubmitReview implements UseCase<Review, SubmitReviewParams> {
       value: params.value,
       comment: params.comment,
       title: params.title,
+      images: params.images,
     );
   }
 }
@@ -43,6 +44,9 @@ class SubmitReviewParams extends Equatable {
   final String comment;
   final String? title;
 
+  /// URL ảnh đã tải lên (`/uploads`). Rỗng nếu không đính ảnh.
+  final List<String> images;
+
   const SubmitReviewParams({
     required this.bookingId,
     required this.overall,
@@ -52,7 +56,20 @@ class SubmitReviewParams extends Equatable {
     required this.value,
     required this.comment,
     this.title,
+    this.images = const [],
   });
+
+  SubmitReviewParams copyWith({List<String>? images}) => SubmitReviewParams(
+        bookingId: bookingId,
+        overall: overall,
+        cleanliness: cleanliness,
+        locationRating: locationRating,
+        service: service,
+        value: value,
+        comment: comment,
+        title: title,
+        images: images ?? this.images,
+      );
 
   @override
   List<Object?> get props => [
@@ -64,5 +81,6 @@ class SubmitReviewParams extends Equatable {
         value,
         comment,
         title,
+        images,
       ];
 }
