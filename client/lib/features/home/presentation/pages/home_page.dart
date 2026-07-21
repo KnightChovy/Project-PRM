@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+import 'package:smart_stay_ai/core/di/injection.dart';
 import 'package:smart_stay_ai/core/router/app_router.dart';
 import 'package:smart_stay_ai/core/session/app_session.dart';
 import 'package:smart_stay_ai/core/theme/app_theme.dart';
@@ -8,14 +9,29 @@ import 'package:smart_stay_ai/core/widgets/app_network_image.dart';
 import 'package:smart_stay_ai/features/profile/presentation/providers/profile_notifier.dart';
 import 'package:smart_stay_ai/features/hotel/domain/entities/hotel.dart';
 import 'package:smart_stay_ai/features/hotel/presentation/demo_hotels.dart';
+import 'package:smart_stay_ai/features/hotel/presentation/providers/hotel_notifier.dart';
 import 'package:smart_stay_ai/features/hotel/presentation/widgets/hotel_card.dart';
 
 /// Trang chủ (tab Home): lời chào, ô tìm kiếm, gợi ý AI, điểm đến phổ biến
 /// và danh sách khách sạn nổi bật.
 ///
 /// NOTE: dùng [kDemoHotels]. Khi có backend, lấy qua UseCase + Notifier.
-class HomePage extends StatelessWidget {
+class HomePage extends StatefulWidget {
   const HomePage({super.key});
+
+  @override
+  State<HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends State<HomePage> {
+  final _hotelN = sl<HotelNotifier>();
+
+  @override
+  void initState() {
+    super.initState();
+    // Tải danh sách khách sạn 1 lần (singleton dùng chung Home/Search/Map).
+    if (_hotelN.status == HotelStatus.initial) _hotelN.load();
+  }
 
   void _openHotel(BuildContext context, Hotel hotel) {
     context.push(AppRoutes.hotelDetail, extra: hotel);
@@ -27,14 +43,20 @@ class HomePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final aiPicks = kDemoHotels.take(3).toList();
-    final featured = kDemoHotels.skip(1).toList();
+    return ChangeNotifierProvider.value(
+      value: _hotelN,
+      child: Consumer<HotelNotifier>(
+        builder: (context, hotelN, _) {
+          final hotels = hotelN.hotels;
+          final aiPicks = hotels.take(3).toList();
+          final featured =
+              hotels.length > 1 ? hotels.skip(1).toList() : hotels;
 
-    return SafeArea(
-      bottom: false,
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-        children: [
+          return SafeArea(
+            bottom: false,
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+              children: [
           const _Header(),
           const SizedBox(height: 20),
           _SearchBar(onTap: () => _openSearch(context)),
@@ -90,13 +112,33 @@ class HomePage extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 14),
-          ...featured.map(
-            (h) => Padding(
-              padding: const EdgeInsets.only(bottom: 18),
-              child: HotelCard(hotel: h, onTap: () => _openHotel(context, h)),
+          if (hotelN.isLoading && hotels.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 32),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (hotelN.status == HotelStatus.error)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 24),
+              child: Center(
+                child: Text(
+                  hotelN.errorMessage ?? 'Không tải được khách sạn',
+                  style: const TextStyle(color: AppColors.textSecondary),
+                ),
+              ),
+            )
+          else
+            ...featured.map(
+              (h) => Padding(
+                padding: const EdgeInsets.only(bottom: 18),
+                child:
+                    HotelCard(hotel: h, onTap: () => _openHotel(context, h)),
+              ),
             ),
-          ),
-        ],
+              ],
+            ),
+          );
+        },
       ),
     );
   }

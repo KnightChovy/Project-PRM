@@ -45,6 +45,10 @@ class ApiConstants {
   static String walletPayment(String bookingId) =>
       '/payments/bookings/$bookingId/wallet';
 
+  // ---- Hotel ----
+  static const String hotels = '/hotels'; // GET tìm/danh sách khách sạn
+  static String hotelById(String hotelId) => '/hotels/$hotelId'; // GET chi tiết
+
   // ---- Review ----
   static const String reviews = '/reviews'; // POST tạo đánh giá
   static const String myReviews = '/reviews/me'; // GET đánh giá của tôi

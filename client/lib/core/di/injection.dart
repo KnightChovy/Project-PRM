@@ -47,6 +47,13 @@ import 'package:smart_stay_ai/features/profile/domain/usecases/change_my_passwor
 import 'package:smart_stay_ai/features/profile/domain/usecases/get_my_profile.dart';
 import 'package:smart_stay_ai/features/profile/domain/usecases/update_my_profile.dart';
 import 'package:smart_stay_ai/features/profile/presentation/providers/profile_notifier.dart';
+import 'package:smart_stay_ai/features/hotel/data/datasources/hotel_remote_data_source.dart';
+import 'package:smart_stay_ai/features/hotel/data/repositories/hotel_repository_impl.dart';
+import 'package:smart_stay_ai/features/hotel/domain/repositories/hotel_repository.dart';
+import 'package:smart_stay_ai/features/hotel/domain/usecases/search_hotels.dart';
+import 'package:smart_stay_ai/features/hotel/domain/usecases/get_hotel_detail.dart';
+import 'package:smart_stay_ai/features/hotel/presentation/providers/hotel_notifier.dart';
+import 'package:smart_stay_ai/features/hotel/presentation/providers/hotel_detail_notifier.dart';
 
 /// "Service Locator" — nơi khai báo mọi phụ thuộc của app.
 final sl = GetIt.instance;
@@ -189,6 +196,18 @@ Future<void> initDependencies() async {
       changeMyPassword: sl(),
     ),
   );
+
+  // ---- Feature: hotel (API thật) ----
+  sl.registerLazySingleton<HotelRemoteDataSource>(
+    () => HotelRemoteDataSourceImpl(sl()),
+  );
+  sl.registerLazySingleton<HotelRepository>(() => HotelRepositoryImpl(sl()));
+  sl.registerLazySingleton(() => SearchHotels(sl()));
+  sl.registerLazySingleton(() => GetHotelDetail(sl()));
+  // Singleton: Home/Search/Map dùng chung danh sách khách sạn đã tải.
+  sl.registerLazySingleton(() => HotelNotifier(sl()));
+  // Factory: mỗi trang chi tiết là một phiên riêng.
+  sl.registerFactory(() => HotelDetailNotifier(sl()));
 
   // ---- Dọn dữ liệu khi đăng xuất ----
   // Mọi notifier ở trên đều là lazy singleton, sống suốt vòng đời tiến trình.
