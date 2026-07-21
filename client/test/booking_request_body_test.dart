@@ -8,7 +8,6 @@ import 'package:smart_stay_ai/core/error/exceptions.dart';
 import 'package:smart_stay_ai/core/network/dio_client.dart';
 import 'package:smart_stay_ai/core/network/token_storage.dart';
 import 'package:smart_stay_ai/features/booking/data/datasources/booking_remote_data_source.dart';
-import 'package:smart_stay_ai/features/booking/domain/entities/checkout.dart';
 import 'package:smart_stay_ai/features/booking/domain/entities/booking_status.dart';
 
 /// Chặn request ở tầng adapter để soi đúng những gì được gửi lên, và trả về
@@ -165,43 +164,28 @@ void main() {
   });
 
   group('PATCH /bookings/{id}/cancel', () {
-    test('hoàn về ví thì TUYỆT ĐỐI không gửi bankAccount', () async {
+    test('CHỈ gửi reason — không gửi refundMethod/bankAccount', () async {
       final (dataSource, adapter) = await _build(responseBody: _bookingJson());
 
-      await dataSource.cancel(
-        bookingId: 'b-1',
-        destination: const WalletRefund(),
-        reason: 'Đổi lịch',
-      );
+      await dataSource.cancel(bookingId: 'b-1', reason: 'Đổi lịch');
 
       final body = adapter.captured!.data as Map<String, dynamic>;
-      expect(body['refundMethod'], 'wallet');
-      // Joi đánh dấu forbidden -> gửi kèm là ăn 400.
-      expect(body.containsKey('bankAccount'), isFalse);
       expect(body['reason'], 'Đổi lịch');
+      // API huỷ chỉ nhận `reason`; refund do server tự tính. Gửi kèm field lạ
+      // là ăn Joi 400.
+      expect(body.containsKey('refundMethod'), isFalse);
+      expect(body.containsKey('bankAccount'), isFalse);
     });
 
-    test('hoàn về ngân hàng thì gửi kèm đủ thông tin tài khoản', () async {
+    test('không có reason thì body rỗng (không gửi field thừa)', () async {
       final (dataSource, adapter) = await _build(responseBody: _bookingJson());
 
-      await dataSource.cancel(
-        bookingId: 'b-1',
-        destination: const BankRefund(
-          BankAccount(
-            accountNumber: '0123456789',
-            bankName: 'Vietcombank',
-            accountHolder: 'NGUYEN VAN A',
-          ),
-        ),
-      );
+      await dataSource.cancel(bookingId: 'b-1');
 
       final body = adapter.captured!.data as Map<String, dynamic>;
-      expect(body['refundMethod'], 'bank');
-      expect(body['bankAccount'], {
-        'accountNumber': '0123456789',
-        'bankName': 'Vietcombank',
-        'accountHolder': 'NGUYEN VAN A',
-      });
+      expect(body.containsKey('reason'), isFalse);
+      expect(body.containsKey('refundMethod'), isFalse);
+      expect(body.containsKey('bankAccount'), isFalse);
     });
   });
 

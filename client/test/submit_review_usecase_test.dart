@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:fpdart/fpdart.dart';
 import 'package:smart_stay_ai/core/error/failures.dart';
 import 'package:smart_stay_ai/features/review/domain/entities/review.dart';
+import 'package:smart_stay_ai/features/review/domain/entities/hotel_review.dart';
 import 'package:smart_stay_ai/features/review/domain/repositories/review_repository.dart';
 import 'package:smart_stay_ai/features/review/domain/usecases/submit_review.dart';
 
@@ -19,6 +20,7 @@ class _FakeReviewRepository implements ReviewRepository {
     required int value,
     required String comment,
     String? title,
+    List<String> images = const [],
   }) async {
     called = true;
     return Right(Review(
@@ -40,6 +42,19 @@ class _FakeReviewRepository implements ReviewRepository {
   @override
   Future<Either<Failure, List<Review>>> getMyReviews() async =>
       const Right([]);
+
+  @override
+  Future<Either<Failure, List<HotelReview>>> getHotelReviews(
+    String hotelId,
+  ) async =>
+      const Right([]);
+
+  @override
+  Future<Either<Failure, String>> uploadImage({
+    required List<int> bytes,
+    required String filename,
+  }) async =>
+      const Right('https://cdn.test/img.jpg');
 }
 
 SubmitReviewParams _params({required int overall}) => SubmitReviewParams(

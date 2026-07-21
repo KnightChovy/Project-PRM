@@ -70,6 +70,9 @@ class _EditProfilePageState extends State<EditProfilePage> {
     _dob = profile.dateOfBirth;
     _language = profile.preferredLanguage;
     _currency = profile.preferredCurrency;
+    _prefs
+      ..clear()
+      ..addAll(profile.travelStyles);
   }
 
   @override
@@ -115,6 +118,11 @@ class _EditProfilePageState extends State<EditProfilePage> {
       preferredCurrency: _currency == original.preferredCurrency
           ? null
           : _currency,
+      // Gu du lịch: chỉ gửi khi tập chọn khác tập ban đầu.
+      travelStyles: (_prefs.length != original.travelStyles.length ||
+              !_prefs.containsAll(original.travelStyles))
+          ? _prefs.toList()
+          : null,
     );
   }
 
@@ -269,10 +277,8 @@ class _EditProfilePageState extends State<EditProfilePage> {
                       style: Theme.of(context).textTheme.headlineMedium,
                     ),
                     const SizedBox(height: 4),
-                    // TODO(backend): chưa có API lưu sở thích du lịch — chọn ở
-                    // đây chỉ sống trong phiên, thoát màn là mất.
                     Text(
-                      'Chưa được lưu lên máy chủ.',
+                      'Chọn gu du lịch — lưu cùng hồ sơ của bạn.',
                       style: Theme.of(context).textTheme.labelSmall?.copyWith(
                         color: AppTheme.onSurfaceVariant,
                       ),

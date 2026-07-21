@@ -1,24 +1,45 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:smart_stay_ai/core/di/injection.dart';
 import 'package:smart_stay_ai/core/router/app_router.dart';
 import 'package:smart_stay_ai/core/theme/app_theme.dart';
 import 'package:smart_stay_ai/core/utils/amenity_icons.dart';
 import 'package:smart_stay_ai/core/widgets/app_network_image.dart';
 import 'package:smart_stay_ai/features/hotel/domain/entities/hotel.dart';
 import 'package:smart_stay_ai/features/rooms/domain/entities/room.dart';
+import 'package:smart_stay_ai/features/rooms/presentation/providers/room_notifier.dart';
 
 /// Trang danh sách các loại phòng (Deluxe, Standard, Suite...).
 /// Chạm vào 1 phòng -> mở [RoomDetailPage] để xem chi tiết & đặt.
 ///
-/// NOTE: dùng dữ liệu mẫu [_demoRooms]. Khi có backend, lấy danh sách phòng
-/// theo hotelId qua UseCase + Notifier.
-class RoomListPage extends StatelessWidget {
+/// Lấy loại phòng thật theo `hotel.id` qua [RoomNotifier] (GET /hotels/:id/room-types).
+class RoomListPage extends StatefulWidget {
   const RoomListPage({super.key, required this.hotel});
 
   final Hotel hotel;
 
-  void _openRoom(BuildContext context, Room room) {
-    context.push(AppRoutes.roomDetail, extra: (hotel, room));
+  @override
+  State<RoomListPage> createState() => _RoomListPageState();
+}
+
+class _RoomListPageState extends State<RoomListPage> {
+  // Factory — mỗi màn danh sách phòng là một phiên riêng nên ta tự dispose.
+  final RoomNotifier _roomN = sl<RoomNotifier>();
+
+  @override
+  void initState() {
+    super.initState();
+    _roomN.load(widget.hotel.id);
+  }
+
+  @override
+  void dispose() {
+    _roomN.dispose();
+    super.dispose();
+  }
+
+  void _openRoom(Room room) {
+    context.push(AppRoutes.roomDetail, extra: (widget.hotel, room));
   }
 
   @override
@@ -35,18 +56,49 @@ class RoomListPage extends StatelessWidget {
         ),
         centerTitle: true,
       ),
-      body: ListView.separated(
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-        itemCount: _demoRooms.length,
-        separatorBuilder: (_, _) => const SizedBox(height: 20),
-        itemBuilder: (_, i) {
-          final room = _demoRooms[i];
-          return _RoomCard(
-            room: room,
-            onTap: () => _openRoom(context, room),
-          );
-        },
+      body: AnimatedBuilder(
+        animation: _roomN,
+        builder: (context, _) => _body(),
       ),
+    );
+  }
+
+  Widget _body() {
+    if (_roomN.isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_roomN.status == RoomStatus.error) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(
+            _roomN.errorMessage ?? 'Không tải được danh sách phòng',
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: AppColors.textSecondary),
+          ),
+        ),
+      );
+    }
+    final rooms = _roomN.rooms;
+    if (rooms.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Text(
+            'Khách sạn này chưa có phòng để đặt.',
+            style: TextStyle(color: AppColors.textSecondary),
+          ),
+        ),
+      );
+    }
+    return ListView.separated(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+      itemCount: rooms.length,
+      separatorBuilder: (_, _) => const SizedBox(height: 20),
+      itemBuilder: (_, i) {
+        final room = rooms[i];
+        return _RoomCard(room: room, onTap: () => _openRoom(room));
+      },
     );
   }
 }
@@ -202,54 +254,3 @@ class _AmenityChip extends StatelessWidget {
   }
 }
 
-/// Dữ liệu mẫu các loại phòng — thay bằng dữ liệu thật từ API khi sẵn sàng.
-const _demoRooms = <Room>[
-  Room(
-    id: 'r1',
-    name: 'Deluxe Ocean View',
-    bedType: '1 King Bed',
-    sizeSqm: 45,
-    maxGuests: 2,
-    floor: '5th Floor',
-    images: [
-      'https://images.unsplash.com/photo-1611892440504-42a792e24d32?w=800',
-      'https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?w=800',
-    ],
-    amenities: ['King Bed', 'Sea View', 'Bathtub', 'Smart TV', 'Minibar', 'Balcony'],
-    pricePerNight: 450,
-    taxesAndFees: 45,
-    freeCancellationBefore: 'Jun 10',
-  ),
-  Room(
-    id: 'r2',
-    name: 'Standard Garden View',
-    bedType: '1 Queen Bed',
-    sizeSqm: 30,
-    maxGuests: 2,
-    floor: '2nd Floor',
-    images: [
-      'https://images.unsplash.com/photo-1505693416388-ac5ce068fe85?w=800',
-      'https://images.unsplash.com/photo-1566665797739-1674de7a421a?w=800',
-    ],
-    amenities: ['Queen Bed', 'Smart TV', 'Minibar', 'WiFi'],
-    pricePerNight: 250,
-    taxesAndFees: 25,
-    freeCancellationBefore: 'Jun 12',
-  ),
-  Room(
-    id: 'r3',
-    name: 'Premier Suite',
-    bedType: '1 King Bed + Sofa',
-    sizeSqm: 70,
-    maxGuests: 4,
-    floor: '8th Floor',
-    images: [
-      'https://images.unsplash.com/photo-1591088398332-8a7791972843?w=800',
-      'https://images.unsplash.com/photo-1618773928121-c32242e63f39?w=800',
-    ],
-    amenities: ['King Bed', 'Sea View', 'Bathtub', 'Smart TV', 'Minibar', 'Balcony'],
-    pricePerNight: 680,
-    taxesAndFees: 68,
-    freeCancellationBefore: 'Jun 8',
-  ),
-];

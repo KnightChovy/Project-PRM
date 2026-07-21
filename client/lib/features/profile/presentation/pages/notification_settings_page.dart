@@ -4,19 +4,15 @@ import 'package:provider/provider.dart';
 import '../../../../core/di/injection.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/widgets/app_message_dialog.dart';
+import '../../domain/entities/profile_update.dart';
+import '../../domain/entities/user_profile.dart';
 import '../providers/profile_notifier.dart';
 
 /// Notification settings.
 ///
-/// CẢNH BÁO VỀ PHẠM VI: backend hiện KHÔNG có API cài đặt thông báo.
-/// `/v1/notifications/*` chỉ là hộp thư (list / đánh dấu đã đọc / xoá), còn
-/// preference duy nhất tồn tại trong `schema.prisma` là `marketingOptIn` trên
-/// bảng `UserProfile` — sửa được qua `PATCH /v1/users/me`.
-///
-/// Vì vậy chỉ "Promotional Offers" là được lưu thật; các toggle còn lại vẫn
-/// chỉ sống trong phiên. Muốn lưu hết thì backend phải thêm model
-/// `NotificationPreference` + endpoint tương ứng (model `PushToken` đã có sẵn
-/// trong schema nhưng chưa service nào dùng).
+/// Các toggle được lưu vào `UserProfile.notificationPrefs` (JSON) qua
+/// `PATCH /v1/users/me`. Riêng "Promotional Offers" vẫn map thẳng vào cột
+/// `marketingOptIn` như trước.
 class NotificationSettingsPage extends StatefulWidget {
   const NotificationSettingsPage({super.key});
 
@@ -29,7 +25,7 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
   final _notifier = sl<ProfileNotifier>();
 
   // key -> enabled. `bookingConfirmations` is locked on (disabled in the mockup).
-  // TODO(backend): các cờ dưới đây chưa có chỗ lưu trên server.
+  // Giá trị mặc định; sẽ được ghi đè bằng notificationPrefs của hồ sơ khi tải.
   final Map<String, bool> _alerts = {
     'priceDrops': true,
     'aiDeals': true,
@@ -42,10 +38,40 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
   @override
   void initState() {
     super.initState();
-    if (_notifier.profile == null) _notifier.load();
+    _seedFrom(_notifier.profile);
+    if (_notifier.profile == null) {
+      _notifier.load().then((_) {
+        if (mounted) setState(() => _seedFrom(_notifier.profile));
+      });
+    }
   }
 
-  /// Toggle DUY NHẤT được ghi xuống server.
+  /// Nạp trạng thái toggle từ `notificationPrefs` đã lưu (thiếu key thì giữ mặc định).
+  void _seedFrom(UserProfile? profile) {
+    final saved = profile?.notificationPrefs;
+    if (saved == null || saved.isEmpty) return;
+    for (final k in _alerts.keys.toList()) {
+      if (saved.containsKey(k)) _alerts[k] = saved[k]!;
+    }
+    for (final k in _comms.keys.toList()) {
+      if (saved.containsKey(k)) _comms[k] = saved[k]!;
+    }
+  }
+
+  /// Đổi 1 toggle rồi lưu cả bộ notificationPrefs lên server.
+  Future<void> _toggle(Map<String, bool> map, String key, bool value) async {
+    setState(() => map[key] = value);
+    final all = <String, bool>{..._alerts, ..._comms};
+    final ok = await _notifier.save(ProfileUpdate(notificationPrefs: all));
+    if (!mounted || ok) return;
+    await showAppErrorDialog(
+      context,
+      title: 'Không lưu được cài đặt',
+      message: _notifier.actionErrorMessage ?? 'Vui lòng thử lại.',
+    );
+  }
+
+  /// "Promotional Offers" map thẳng vào cột `marketingOptIn`.
   Future<void> _setMarketing(bool value) async {
     final ok = await _notifier.setMarketingOptIn(value);
     if (!mounted || ok) return;
@@ -80,19 +106,19 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
                     icon: Icons.trending_down,
                     label: 'Price Drops on Wishlist',
                     value: _alerts['priceDrops']!,
-                    onChanged: (v) => setState(() => _alerts['priceDrops'] = v),
+                    onChanged: (v) => _toggle(_alerts, 'priceDrops', v),
                   ),
                   _ToggleRow(
                     icon: Icons.auto_awesome,
                     label: 'AI Personalized Deals',
                     value: _alerts['aiDeals']!,
-                    onChanged: (v) => setState(() => _alerts['aiDeals'] = v),
+                    onChanged: (v) => _toggle(_alerts, 'aiDeals', v),
                   ),
                   _ToggleRow(
                     icon: Icons.notification_important_outlined,
                     label: 'Check-in Reminders',
                     value: _alerts['checkIn']!,
-                    onChanged: (v) => setState(() => _alerts['checkIn'] = v),
+                    onChanged: (v) => _toggle(_alerts, 'checkIn', v),
                   ),
                   // Cờ THẬT: map thẳng vào `UserProfile.marketingOptIn`.
                   Consumer<ProfileNotifier>(
@@ -111,13 +137,13 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
                     icon: Icons.rate_review_outlined,
                     label: 'Review Reminders',
                     value: _alerts['reviews']!,
-                    onChanged: (v) => setState(() => _alerts['reviews'] = v),
+                    onChanged: (v) => _toggle(_alerts, 'reviews', v),
                   ),
                   _ToggleRow(
                     icon: Icons.system_update,
                     label: 'App Updates',
                     value: _alerts['appUpdates']!,
-                    onChanged: (v) => setState(() => _alerts['appUpdates'] = v),
+                    onChanged: (v) => _toggle(_alerts, 'appUpdates', v),
                     last: true,
                   ),
                 ],
@@ -139,29 +165,26 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
                     icon: Icons.mail_outline,
                     label: 'Email Notifications',
                     value: _comms['email']!,
-                    onChanged: (v) => setState(() => _comms['email'] = v),
+                    onChanged: (v) => _toggle(_comms, 'email', v),
                   ),
                   _ToggleRow(
                     icon: Icons.sms_outlined,
                     label: 'SMS Notifications',
                     value: _comms['sms']!,
-                    onChanged: (v) => setState(() => _comms['sms'] = v),
+                    onChanged: (v) => _toggle(_comms, 'sms', v),
                   ),
                   _ToggleRow(
                     icon: Icons.notifications_active_outlined,
                     label: 'Push Notifications',
                     value: _comms['push']!,
-                    onChanged: (v) => setState(() => _comms['push'] = v),
+                    onChanged: (v) => _toggle(_comms, 'push', v),
                     last: true,
                   ),
                 ],
               ),
               const SizedBox(height: 24),
-              // Nói thẳng cho người dùng biết cái gì được lưu, cái gì không —
-              // tốt hơn là để họ tưởng đã lưu rồi mở lại thấy mất.
               Text(
-                'Hiện chỉ "Promotional Offers" được lưu vào tài khoản. '
-                'Các tuỳ chọn khác sẽ trở lại mặc định khi bạn mở lại ứng dụng.',
+                'Cài đặt được lưu vào tài khoản của bạn và đồng bộ giữa các thiết bị.',
                 style: t.labelSmall?.copyWith(color: AppTheme.onSurfaceVariant),
               ),
               const SizedBox(height: 48),

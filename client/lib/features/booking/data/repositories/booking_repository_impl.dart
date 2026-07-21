@@ -73,15 +73,10 @@ class BookingRepositoryImpl implements BookingRepository {
   @override
   Future<Either<Failure, Booking>> cancel({
     required String bookingId,
-    required RefundDestination destination,
     String? reason,
   }) {
     return guardApiCall(
-      () => remote.cancel(
-        bookingId: bookingId,
-        destination: destination,
-        reason: reason,
-      ),
+      () => remote.cancel(bookingId: bookingId, reason: reason),
     );
   }
 

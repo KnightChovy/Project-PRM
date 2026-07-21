@@ -126,7 +126,6 @@ class BookingNotifier extends ChangeNotifier {
   /// Huỷ booking. [bookingId] cho phép huỷ một booking đến từ danh sách
   /// (màn Cancel nhận booking qua route chứ không tự tạo).
   Future<Booking?> cancel({
-    required RefundDestination destination,
     String? reason,
     String? bookingId,
   }) async {
@@ -135,11 +134,7 @@ class BookingNotifier extends ChangeNotifier {
 
     _begin();
     final result = await cancelBooking(
-      CancelBookingParams(
-        bookingId: id,
-        destination: destination,
-        reason: reason,
-      ),
+      CancelBookingParams(bookingId: id, reason: reason),
     );
     return _settle(result, onSuccess: (r) => booking = r);
   }

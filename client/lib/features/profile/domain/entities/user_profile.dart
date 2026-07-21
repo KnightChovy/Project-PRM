@@ -26,6 +26,22 @@ class UserProfile extends Equatable {
   final String preferredCurrency;
   final bool marketingOptIn;
 
+  /// Gu du lịch (Beach, Luxury, Adventure...). Rỗng nếu chưa chọn.
+  final List<String> travelStyles;
+
+  /// Tuỳ chọn bật/tắt từng loại thông báo (key -> bool). Rỗng = dùng mặc định.
+  final Map<String, bool> notificationPrefs;
+
+  // --- Loyalty (bảng LoyaltyAccount) ---
+  final int loyaltyPoints;
+
+  /// bronze | silver | gold | platinum.
+  final String loyaltyTier;
+
+  // --- Thống kê nhanh (server tính) ---
+  final int tripsCount;
+  final int reviewsCount;
+
   const UserProfile({
     required this.id,
     required this.email,
@@ -42,6 +58,12 @@ class UserProfile extends Equatable {
     required this.preferredLanguage,
     required this.preferredCurrency,
     required this.marketingOptIn,
+    this.travelStyles = const [],
+    this.notificationPrefs = const {},
+    this.loyaltyPoints = 0,
+    this.loyaltyTier = 'bronze',
+    this.tripsCount = 0,
+    this.reviewsCount = 0,
   });
 
   bool get isEmailVerified => emailVerifiedAt != null;
@@ -63,5 +85,11 @@ class UserProfile extends Equatable {
     preferredLanguage,
     preferredCurrency,
     marketingOptIn,
+    travelStyles,
+    notificationPrefs,
+    loyaltyPoints,
+    loyaltyTier,
+    tripsCount,
+    reviewsCount,
   ];
 }

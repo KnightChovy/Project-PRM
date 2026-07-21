@@ -7,7 +7,6 @@ import 'package:smart_stay_ai/features/booking/data/datasources/booking_remote_d
 import 'package:smart_stay_ai/features/booking/data/models/checkout_model.dart';
 import 'package:smart_stay_ai/features/booking/data/models/booking_model.dart';
 import 'package:smart_stay_ai/features/booking/data/repositories/booking_repository_impl.dart';
-import 'package:smart_stay_ai/features/booking/domain/entities/checkout.dart';
 import 'package:smart_stay_ai/features/booking/domain/entities/paginated.dart';
 import 'package:smart_stay_ai/features/booking/domain/entities/booking.dart';
 import 'package:smart_stay_ai/features/booking/domain/entities/booking_status.dart';
@@ -38,7 +37,7 @@ class _FakeRemote implements BookingRemoteDataSource {
   /// Exception mà mọi hàm sẽ ném ra; null nghĩa là trả dữ liệu thành công.
   Exception? throws;
 
-  RefundDestination? capturedDestination;
+  String? capturedReason;
 
   T _run<T>(T value) {
     final error = throws;
@@ -81,10 +80,9 @@ class _FakeRemote implements BookingRemoteDataSource {
   @override
   Future<BookingModel> cancel({
     required String bookingId,
-    required RefundDestination destination,
     String? reason,
   }) async {
-    capturedDestination = destination;
+    capturedReason = reason;
     return _run(_booking());
   }
 
@@ -200,19 +198,10 @@ void main() {
       expect(paged.hasNextPage, isTrue);
     });
 
-    test('cancel chuyển tiếp đúng nơi nhận tiền hoàn', () async {
-      await repository.cancel(
-        bookingId: 'b-1',
-        destination: const BankRefund(
-          BankAccount(
-            accountNumber: '123',
-            bankName: 'VCB',
-            accountHolder: 'NGUYEN VAN A',
-          ),
-        ),
-      );
+    test('cancel chuyển tiếp reason xuống datasource', () async {
+      await repository.cancel(bookingId: 'b-1', reason: 'Đổi lịch');
 
-      expect(remote.capturedDestination, isA<BankRefund>());
+      expect(remote.capturedReason, 'Đổi lịch');
     });
 
     test('payWithWallet báo còn thiếu tiền khi ví không đủ', () async {

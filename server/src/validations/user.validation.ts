@@ -60,6 +60,8 @@ export const updateMyProfile = {
       preferredLanguage: Joi.string().valid('vi', 'en'),
       preferredCurrency: Joi.string().valid('VND', 'USD'),
       marketingOptIn: Joi.boolean(),
+      travelStyles: Joi.array().items(Joi.string().max(50)).max(20),
+      notificationPrefs: Joi.object().pattern(Joi.string().max(50), Joi.boolean()).allow(null),
     })
     .min(1),
 };

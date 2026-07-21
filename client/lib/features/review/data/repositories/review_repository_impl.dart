@@ -2,6 +2,7 @@ import 'package:fpdart/fpdart.dart';
 import 'package:smart_stay_ai/core/error/exception_to_failure.dart';
 import 'package:smart_stay_ai/core/error/failures.dart';
 import '../../domain/entities/review.dart';
+import '../../domain/entities/hotel_review.dart';
 import '../../domain/repositories/review_repository.dart';
 import '../datasources/review_remote_data_source.dart';
 
@@ -21,6 +22,7 @@ class ReviewRepositoryImpl implements ReviewRepository {
     required int value,
     required String comment,
     String? title,
+    List<String> images = const [],
   }) {
     return guardApiCall(() => remote.submit(
           bookingId: bookingId,
@@ -31,11 +33,27 @@ class ReviewRepositoryImpl implements ReviewRepository {
           value: value,
           comment: comment,
           title: title,
+          images: images,
         ));
+  }
+
+  @override
+  Future<Either<Failure, String>> uploadImage({
+    required List<int> bytes,
+    required String filename,
+  }) {
+    return guardApiCall(
+      () => remote.uploadImage(bytes: bytes, filename: filename),
+    );
   }
 
   @override
   Future<Either<Failure, List<Review>>> getMyReviews() {
     return guardApiCall(() => remote.getMyReviews());
+  }
+
+  @override
+  Future<Either<Failure, List<HotelReview>>> getHotelReviews(String hotelId) {
+    return guardApiCall(() => remote.getHotelReviews(hotelId));
   }
 }

@@ -19,6 +19,12 @@ class UserProfileModel extends UserProfile {
     required super.preferredLanguage,
     required super.preferredCurrency,
     required super.marketingOptIn,
+    super.travelStyles,
+    super.notificationPrefs,
+    super.loyaltyPoints,
+    super.loyaltyTier,
+    super.tripsCount,
+    super.reviewsCount,
   });
 
   /// Nhận nguyên response của `GET`/`PATCH /v1/users/me`.
@@ -27,6 +33,8 @@ class UserProfileModel extends UserProfile {
   /// nên mọi field bên trong đều phải đọc phòng thủ.
   factory UserProfileModel.fromJson(Map<String, dynamic> json) {
     final profile = json['profile'] as Map<String, dynamic>?;
+    final loyalty = json['loyaltyAccount'] as Map<String, dynamic>?;
+    final stats = json['stats'] as Map<String, dynamic>?;
 
     return UserProfileModel(
       id: json['id']?.toString() ?? '',
@@ -44,12 +52,31 @@ class UserProfileModel extends UserProfile {
       preferredLanguage: profile?['preferredLanguage']?.toString() ?? 'vi',
       preferredCurrency: profile?['preferredCurrency']?.toString() ?? 'VND',
       marketingOptIn: profile?['marketingOptIn'] as bool? ?? false,
+      travelStyles: _strList(profile?['travelStyles']),
+      notificationPrefs: _boolMap(profile?['notificationPrefs']),
+      loyaltyPoints: (loyalty?['totalPoints'] as num?)?.toInt() ?? 0,
+      loyaltyTier: loyalty?['tier']?.toString() ?? 'bronze',
+      tripsCount: (stats?['trips'] as num?)?.toInt() ?? 0,
+      reviewsCount: (stats?['reviews'] as num?)?.toInt() ?? 0,
     );
   }
 
   static DateTime? _parseDate(Object? raw) {
     if (raw == null) return null;
     return DateTime.tryParse(raw.toString());
+  }
+
+  static List<String> _strList(Object? v) =>
+      v is List ? v.whereType<String>().toList() : const [];
+
+  static Map<String, bool> _boolMap(Object? v) {
+    if (v is Map) {
+      return {
+        for (final e in v.entries)
+          if (e.value is bool) e.key.toString(): e.value as bool,
+      };
+    }
+    return const {};
   }
 }
 
@@ -75,6 +102,8 @@ Map<String, dynamic> profileUpdateToJson(ProfileUpdate changes) {
   put('preferredLanguage', changes.preferredLanguage);
   put('preferredCurrency', changes.preferredCurrency);
   put('marketingOptIn', changes.marketingOptIn);
+  put('travelStyles', changes.travelStyles);
+  put('notificationPrefs', changes.notificationPrefs);
 
   return body;
 }

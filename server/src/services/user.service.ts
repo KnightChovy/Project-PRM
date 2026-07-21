@@ -1,6 +1,7 @@
 import httpStatus from 'http-status';
 import bcrypt from 'bcryptjs';
-import type { Prisma, User, UserRole, UserStatus } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import type { User, UserRole, UserStatus } from '@prisma/client';
 import prisma from '../config/prisma';
 import config from '../config/config';
 import ApiError from '../utils/ApiError';
@@ -161,12 +162,19 @@ export class UserService {
   getMyProfile = async (userId: string) => {
     const user = await prisma.user.findFirst({
       where: { id: userId, deletedAt: null },
-      include: { profile: true },
+      include: { profile: true, loyaltyAccount: true },
     });
     if (!user) {
       throw new ApiError(httpStatus.NOT_FOUND, 'User not found');
     }
-    return sanitizeUser(user);
+    // Thống kê nhanh cho màn Profile: số chuyến (booking thực sự đi) + số đánh giá.
+    const [trips, reviews] = await Promise.all([
+      prisma.booking.count({
+        where: { customerId: userId, status: { in: ['confirmed', 'checked_in', 'checked_out'] } },
+      }),
+      prisma.review.count({ where: { customerId: userId } }),
+    ]);
+    return { ...sanitizeUser(user), stats: { trips, reviews } };
   };
 
   /**
@@ -188,6 +196,11 @@ export class UserService {
     if (dto.preferredLanguage !== undefined) profileFields.preferredLanguage = dto.preferredLanguage;
     if (dto.preferredCurrency !== undefined) profileFields.preferredCurrency = dto.preferredCurrency;
     if (dto.marketingOptIn !== undefined) profileFields.marketingOptIn = dto.marketingOptIn;
+    if (dto.travelStyles !== undefined) profileFields.travelStyles = dto.travelStyles;
+    // Json field: null phải dùng Prisma.JsonNull để phân biệt với "không đổi".
+    if (dto.notificationPrefs !== undefined) {
+      profileFields.notificationPrefs = dto.notificationPrefs === null ? Prisma.JsonNull : dto.notificationPrefs;
+    }
     const hasProfile = Object.keys(profileFields).length > 0;
 
     const user = await prisma.user.update({

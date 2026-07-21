@@ -45,9 +45,24 @@ class ApiConstants {
   static String walletPayment(String bookingId) =>
       '/payments/bookings/$bookingId/wallet';
 
+  // ---- Hotel ----
+  static const String hotels = '/hotels'; // GET tìm/danh sách khách sạn
+  static const String hotelDestinations =
+      '/hotels/destinations'; // GET điểm đến phổ biến
+  static String hotelById(String hotelId) => '/hotels/$hotelId'; // GET chi tiết
+
+  // ---- Room types (loại phòng của 1 khách sạn) ----
+  static String hotelRoomTypes(String hotelId) =>
+      '/hotels/$hotelId/room-types'; // GET danh sách loại phòng
+  static String hotelRoomTypeById(String hotelId, String roomTypeId) =>
+      '/hotels/$hotelId/room-types/$roomTypeId'; // GET chi tiết loại phòng
+
   // ---- Review ----
   static const String reviews = '/reviews'; // POST tạo đánh giá
   static const String myReviews = '/reviews/me'; // GET đánh giá của tôi
+
+  // ---- Upload ----
+  static const String uploads = '/uploads'; // POST 1 file (field "file") → { url }
 
   // ---- Hồ sơ người dùng ----
   /// GET: lấy hồ sơ (kèm `profile`) — PATCH: cập nhật hồ sơ.

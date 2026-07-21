@@ -33,7 +33,10 @@ import 'package:smart_stay_ai/features/review/data/repositories/review_repositor
 import 'package:smart_stay_ai/features/review/domain/repositories/review_repository.dart';
 import 'package:smart_stay_ai/features/review/domain/usecases/submit_review.dart';
 import 'package:smart_stay_ai/features/review/domain/usecases/get_my_reviews.dart';
+import 'package:smart_stay_ai/features/review/domain/usecases/get_hotel_reviews.dart';
+import 'package:smart_stay_ai/features/review/domain/usecases/upload_review_image.dart';
 import 'package:smart_stay_ai/features/review/presentation/providers/review_notifier.dart';
+import 'package:smart_stay_ai/features/review/presentation/providers/hotel_reviews_notifier.dart';
 import 'package:smart_stay_ai/features/assistant/data/datasources/assistant_remote_data_source.dart';
 import 'package:smart_stay_ai/features/assistant/data/repositories/assistant_repository_impl.dart';
 import 'package:smart_stay_ai/features/assistant/domain/repositories/assistant_repository.dart';
@@ -47,6 +50,26 @@ import 'package:smart_stay_ai/features/profile/domain/usecases/change_my_passwor
 import 'package:smart_stay_ai/features/profile/domain/usecases/get_my_profile.dart';
 import 'package:smart_stay_ai/features/profile/domain/usecases/update_my_profile.dart';
 import 'package:smart_stay_ai/features/profile/presentation/providers/profile_notifier.dart';
+import 'package:smart_stay_ai/features/hotel/data/datasources/hotel_remote_data_source.dart';
+import 'package:smart_stay_ai/features/hotel/data/repositories/hotel_repository_impl.dart';
+import 'package:smart_stay_ai/features/hotel/domain/repositories/hotel_repository.dart';
+import 'package:smart_stay_ai/features/hotel/domain/usecases/search_hotels.dart';
+import 'package:smart_stay_ai/features/hotel/domain/usecases/get_hotel_detail.dart';
+import 'package:smart_stay_ai/features/hotel/domain/usecases/get_destinations.dart';
+import 'package:smart_stay_ai/features/hotel/presentation/providers/hotel_notifier.dart';
+import 'package:smart_stay_ai/features/hotel/presentation/providers/hotel_detail_notifier.dart';
+import 'package:smart_stay_ai/features/rooms/data/datasources/room_remote_data_source.dart';
+import 'package:smart_stay_ai/features/rooms/data/repositories/room_repository_impl.dart';
+import 'package:smart_stay_ai/features/rooms/domain/repositories/room_repository.dart';
+import 'package:smart_stay_ai/features/rooms/domain/usecases/get_room_types.dart';
+import 'package:smart_stay_ai/features/rooms/domain/usecases/get_room_type_detail.dart';
+import 'package:smart_stay_ai/features/rooms/presentation/providers/room_notifier.dart';
+import 'package:smart_stay_ai/features/wishlist/data/datasources/wishlist_local_data_source.dart';
+import 'package:smart_stay_ai/features/wishlist/data/repositories/wishlist_repository_impl.dart';
+import 'package:smart_stay_ai/features/wishlist/domain/repositories/wishlist_repository.dart';
+import 'package:smart_stay_ai/features/wishlist/domain/usecases/get_wishlist.dart';
+import 'package:smart_stay_ai/features/wishlist/domain/usecases/toggle_wishlist.dart';
+import 'package:smart_stay_ai/features/wishlist/presentation/providers/wishlist_notifier.dart';
 
 /// "Service Locator" — nơi khai báo mọi phụ thuộc của app.
 final sl = GetIt.instance;
@@ -153,7 +176,11 @@ Future<void> initDependencies() async {
   sl.registerLazySingleton<ReviewRepository>(() => ReviewRepositoryImpl(sl()));
   sl.registerLazySingleton(() => SubmitReview(sl()));
   sl.registerLazySingleton(() => GetMyReviews(sl()));
-  sl.registerFactory(() => ReviewNotifier(sl(), sl()));
+  sl.registerLazySingleton(() => GetHotelReviews(sl()));
+  sl.registerLazySingleton(() => UploadReviewImage(sl()));
+  sl.registerFactory(() => ReviewNotifier(sl(), sl(), sl()));
+  // Factory: mỗi khách sạn một phiên xem đánh giá riêng.
+  sl.registerFactory(() => HotelReviewsNotifier(sl()));
 
   // ---- Feature: assistant (AI Assistant) ----
   // DataSource — chatbot Gemini thật ở /v1/conversations.
@@ -189,6 +216,41 @@ Future<void> initDependencies() async {
       changeMyPassword: sl(),
     ),
   );
+
+  // ---- Feature: hotel (API thật) ----
+  sl.registerLazySingleton<HotelRemoteDataSource>(
+    () => HotelRemoteDataSourceImpl(sl()),
+  );
+  sl.registerLazySingleton<HotelRepository>(() => HotelRepositoryImpl(sl()));
+  sl.registerLazySingleton(() => SearchHotels(sl()));
+  sl.registerLazySingleton(() => GetHotelDetail(sl()));
+  sl.registerLazySingleton(() => GetDestinations(sl()));
+  // Singleton: Home/Search/Map dùng chung danh sách khách sạn đã tải.
+  sl.registerLazySingleton(() => HotelNotifier(sl(), sl()));
+  // Factory: mỗi trang chi tiết là một phiên riêng.
+  sl.registerFactory(() => HotelDetailNotifier(sl()));
+
+  // ---- Feature: rooms (loại phòng — API thật) ----
+  sl.registerLazySingleton<RoomRemoteDataSource>(
+    () => RoomRemoteDataSourceImpl(sl()),
+  );
+  sl.registerLazySingleton<RoomRepository>(() => RoomRepositoryImpl(sl()));
+  sl.registerLazySingleton(() => GetRoomTypes(sl()));
+  sl.registerLazySingleton(() => GetRoomTypeDetail(sl()));
+  // Factory: mỗi màn danh sách phòng gắn với một hotelId riêng.
+  sl.registerFactory(() => RoomNotifier(sl()));
+
+  // ---- Feature: wishlist (lưu LOCAL — backend chưa có API) ----
+  sl.registerLazySingleton<WishlistLocalDataSource>(
+    () => WishlistLocalDataSourceImpl(prefs),
+  );
+  sl.registerLazySingleton<WishlistRepository>(
+    () => WishlistRepositoryImpl(sl()),
+  );
+  sl.registerLazySingleton(() => GetWishlist(sl()));
+  sl.registerLazySingleton(() => ToggleWishlist(sl()));
+  // Singleton: trái tim ở Detail/Card/tab Wishlist luôn đồng bộ.
+  sl.registerLazySingleton(() => WishlistNotifier(sl(), sl()));
 
   // ---- Dọn dữ liệu khi đăng xuất ----
   // Mọi notifier ở trên đều là lazy singleton, sống suốt vòng đời tiến trình.
