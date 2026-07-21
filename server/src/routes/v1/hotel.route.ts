@@ -33,6 +33,10 @@ const router = express.Router();
 // Tìm khách sạn theo thành phố (kèm kiểm tra phòng trống khi có checkIn/checkOut) — public
 router.get('/', validate(hotelValidation.searchHotels), hotelController.searchHotels);
 
+// Điểm đến phổ biến (gom theo thành phố) — public. '/destinations' là literal nên PHẢI
+// đứng TRƯỚC '/:hotelId' để khỏi bị route param nuốt.
+router.get('/destinations', hotelController.getDestinations);
+
 // Danh sách khách sạn của partner đang đăng nhập (lấy id từ token).
 // '/mine' là literal nên PHẢI đăng ký TRƯỚC '/:hotelId' (param) để khỏi bị '/:hotelId' nuốt.
 router.get('/mine', auth(), hotelController.getMyHotels);
