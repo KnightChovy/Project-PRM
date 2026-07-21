@@ -7,6 +7,8 @@ import '../../../../core/router/app_router.dart';
 import '../../../../core/session/app_session.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../auth/presentation/providers/auth_notifier.dart';
+import '../../../wishlist/presentation/providers/wishlist_notifier.dart';
+import '../../domain/entities/user_profile.dart';
 import '../providers/profile_notifier.dart';
 import 'change_password_page.dart';
 import 'edit_profile_page.dart';
@@ -28,12 +30,28 @@ class _ProfilePageState extends State<ProfilePage> {
   /// Singleton dùng chung với Edit Profile / Notification Settings nên phải
   /// provide bằng `.value`, không để provider dispose nó.
   final _notifier = sl<ProfileNotifier>();
+  // Singleton wishlist — cung cấp số "Saved". Nullable để test hồ sơ (không
+  // đăng ký wishlist trong DI) vẫn dựng được màn.
+  final WishlistNotifier? _wishlistN =
+      sl.isRegistered<WishlistNotifier>() ? sl<WishlistNotifier>() : null;
 
   @override
   void initState() {
     super.initState();
     // Khách vãng lai không có hồ sơ để tải — gọi API chỉ tổ nhận 401.
     if (sl<AppSession>().isSignedIn) _notifier.load();
+    _wishlistN?.addListener(_onWishlist);
+    if (_wishlistN?.status == WishlistStatus.initial) _wishlistN!.load();
+  }
+
+  void _onWishlist() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _wishlistN?.removeListener(_onWishlist);
+    super.dispose();
   }
 
   /// Hỏi xác nhận rồi đăng xuất: xoá toàn bộ stack và quay về màn đăng nhập.
@@ -107,12 +125,18 @@ class _ProfilePageState extends State<ProfilePage> {
                     // đều vô nghĩa khi chưa có tài khoản — ẩn hẳn thay vì hiện
                     // ra rồi báo lỗi lúc chạm vào.
                     if (signedIn) ...[
-                      const _LoyaltyCard(),
-                      const SizedBox(height: 40),
-                      const _StatsRow(),
-                      const SizedBox(height: 40),
-                      const _TravelStyle(),
-                      const SizedBox(height: 40),
+                      if (notifier.profile != null) ...[
+                        _LoyaltyCard(profile: notifier.profile!),
+                        const SizedBox(height: 40),
+                        _StatsRow(
+                          trips: notifier.profile!.tripsCount,
+                          reviews: notifier.profile!.reviewsCount,
+                          saved: _wishlistN?.hotels.length ?? 0,
+                        ),
+                        const SizedBox(height: 40),
+                        _TravelStyle(styles: notifier.profile!.travelStyles),
+                        const SizedBox(height: 40),
+                      ],
                       const _MenuList(),
                       const SizedBox(height: 32),
                       FilledButton(
@@ -317,10 +341,29 @@ class _LoadError extends StatelessWidget {
   }
 }
 
-/// TODO(backend): số liệu mẫu — chưa có API điểm thưởng / hạng thành viên.
-/// Prisma đã có model loyalty nhưng không route/service nào expose ra.
+/// Điểm thưởng + hạng thành viên thật (từ `loyaltyAccount` của `GET /users/me`).
 class _LoyaltyCard extends StatelessWidget {
-  const _LoyaltyCard();
+  const _LoyaltyCard({required this.profile});
+
+  final UserProfile profile;
+
+  /// bronze -> "Bronze" (viết hoa chữ đầu để ghép "SmartStay Gold").
+  String get _tierLabel {
+    final tier = profile.loyaltyTier;
+    if (tier.isEmpty) return 'Bronze';
+    return '${tier[0].toUpperCase()}${tier.substring(1)}';
+  }
+
+  /// 2450 -> "2,450".
+  String get _points {
+    final s = profile.loyaltyPoints.toString();
+    final buf = StringBuffer();
+    for (var i = 0; i < s.length; i++) {
+      if (i > 0 && (s.length - i) % 3 == 0) buf.write(',');
+      buf.write(s[i]);
+    }
+    return buf.toString();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -354,7 +397,7 @@ class _LoyaltyCard extends StatelessWidget {
                   Row(
                     children: [
                       Text(
-                        'SmartStay Gold',
+                        'SmartStay $_tierLabel',
                         style: t.headlineMedium?.copyWith(
                           color: AppTheme.onTertiaryFixed,
                         ),
@@ -385,7 +428,7 @@ class _LoyaltyCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    '2,450',
+                    _points,
                     style: t.displayLarge?.copyWith(
                       color: AppTheme.onTertiaryFixed,
                     ),
@@ -418,9 +461,17 @@ class _LoyaltyCard extends StatelessWidget {
   }
 }
 
-/// TODO(backend): số liệu mẫu — chưa có API thống kê chuyến đi / review / saved.
+/// Thống kê thật: số chuyến (server), số đánh giá (server), số đã lưu (wishlist local).
 class _StatsRow extends StatelessWidget {
-  const _StatsRow();
+  const _StatsRow({
+    required this.trips,
+    required this.reviews,
+    required this.saved,
+  });
+
+  final int trips;
+  final int reviews;
+  final int saved;
 
   @override
   Widget build(BuildContext context) {
@@ -439,12 +490,12 @@ class _StatsRow extends StatelessWidget {
       ),
       child: IntrinsicHeight(
         child: Row(
-          children: const [
-            _Stat(value: '12', label: 'Stays'),
-            VerticalDivider(color: AppTheme.outlineVariant, width: 1),
-            _Stat(value: '8', label: 'Reviews'),
-            VerticalDivider(color: AppTheme.outlineVariant, width: 1),
-            _Stat(value: '5', label: 'Saved'),
+          children: [
+            _Stat(value: '$trips', label: 'Stays'),
+            const VerticalDivider(color: AppTheme.outlineVariant, width: 1),
+            _Stat(value: '$reviews', label: 'Reviews'),
+            const VerticalDivider(color: AppTheme.outlineVariant, width: 1),
+            _Stat(value: '$saved', label: 'Saved'),
           ],
         ),
       ),
@@ -474,9 +525,11 @@ class _Stat extends StatelessWidget {
   }
 }
 
-/// TODO(backend): thẻ sở thích mẫu — chưa có API gợi ý phong cách du lịch.
+/// Gu du lịch thật (từ `profile.travelStyles`). Chạm "+" để sửa ở Edit Profile.
 class _TravelStyle extends StatelessWidget {
-  const _TravelStyle();
+  const _TravelStyle({required this.styles});
+
+  final List<String> styles;
 
   @override
   Widget build(BuildContext context) {
@@ -510,7 +563,9 @@ class _TravelStyle extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            'AI-curated based on your recent bookings.',
+            styles.isEmpty
+                ? 'Chạm + để thêm gu du lịch của bạn.'
+                : 'Dựa trên lựa chọn của bạn.',
             style: t.bodyMedium?.copyWith(color: AppTheme.onSurfaceVariant),
           ),
           const SizedBox(height: 16),
@@ -518,10 +573,15 @@ class _TravelStyle extends StatelessWidget {
             spacing: 8,
             runSpacing: 8,
             children: [
-              _Chip(label: 'Beach Lover'),
-              _Chip(label: 'Business Traveler'),
-              _Chip(label: 'Budget Conscious'),
-              _Chip(label: '+', dashed: true),
+              for (final s in styles) _Chip(label: s),
+              GestureDetector(
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const EditProfilePage(),
+                  ),
+                ),
+                child: const _Chip(label: '+', dashed: true),
+              ),
             ],
           ),
         ],

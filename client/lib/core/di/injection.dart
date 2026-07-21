@@ -55,6 +55,7 @@ import 'package:smart_stay_ai/features/hotel/data/repositories/hotel_repository_
 import 'package:smart_stay_ai/features/hotel/domain/repositories/hotel_repository.dart';
 import 'package:smart_stay_ai/features/hotel/domain/usecases/search_hotels.dart';
 import 'package:smart_stay_ai/features/hotel/domain/usecases/get_hotel_detail.dart';
+import 'package:smart_stay_ai/features/hotel/domain/usecases/get_destinations.dart';
 import 'package:smart_stay_ai/features/hotel/presentation/providers/hotel_notifier.dart';
 import 'package:smart_stay_ai/features/hotel/presentation/providers/hotel_detail_notifier.dart';
 import 'package:smart_stay_ai/features/rooms/data/datasources/room_remote_data_source.dart';
@@ -223,8 +224,9 @@ Future<void> initDependencies() async {
   sl.registerLazySingleton<HotelRepository>(() => HotelRepositoryImpl(sl()));
   sl.registerLazySingleton(() => SearchHotels(sl()));
   sl.registerLazySingleton(() => GetHotelDetail(sl()));
+  sl.registerLazySingleton(() => GetDestinations(sl()));
   // Singleton: Home/Search/Map dùng chung danh sách khách sạn đã tải.
-  sl.registerLazySingleton(() => HotelNotifier(sl()));
+  sl.registerLazySingleton(() => HotelNotifier(sl(), sl()));
   // Factory: mỗi trang chi tiết là một phiên riêng.
   sl.registerFactory(() => HotelDetailNotifier(sl()));
 

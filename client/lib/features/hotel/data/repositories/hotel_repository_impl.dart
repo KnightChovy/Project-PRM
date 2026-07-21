@@ -2,6 +2,7 @@ import 'package:fpdart/fpdart.dart';
 import 'package:smart_stay_ai/core/error/exception_to_failure.dart';
 import 'package:smart_stay_ai/core/error/failures.dart';
 import '../../domain/entities/hotel.dart';
+import '../../domain/entities/destination.dart';
 import '../../domain/repositories/hotel_repository.dart';
 import '../datasources/hotel_remote_data_source.dart';
 
@@ -29,5 +30,10 @@ class HotelRepositoryImpl implements HotelRepository {
   @override
   Future<Either<Failure, Hotel>> getHotelDetail(String hotelId) {
     return guardApiCall(() => remote.getHotelDetail(hotelId));
+  }
+
+  @override
+  Future<Either<Failure, List<Destination>>> getDestinations() {
+    return guardApiCall(() => remote.getDestinations());
   }
 }

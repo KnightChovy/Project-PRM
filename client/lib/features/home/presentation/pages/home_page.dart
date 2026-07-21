@@ -8,7 +8,7 @@ import 'package:smart_stay_ai/core/theme/app_theme.dart';
 import 'package:smart_stay_ai/core/widgets/app_network_image.dart';
 import 'package:smart_stay_ai/features/profile/presentation/providers/profile_notifier.dart';
 import 'package:smart_stay_ai/features/hotel/domain/entities/hotel.dart';
-import 'package:smart_stay_ai/features/hotel/presentation/demo_hotels.dart';
+import 'package:smart_stay_ai/features/hotel/domain/entities/destination.dart';
 import 'package:smart_stay_ai/features/hotel/presentation/providers/hotel_notifier.dart';
 import 'package:smart_stay_ai/features/hotel/presentation/widgets/hotel_card.dart';
 import 'package:smart_stay_ai/features/wishlist/presentation/providers/wishlist_notifier.dart';
@@ -99,19 +99,22 @@ class _HomePageState extends State<HomePage> {
               },
             ),
           ),
-          const SizedBox(height: 28),
-          _SectionTitle(title: 'Popular Destinations'),
-          const SizedBox(height: 14),
-          SizedBox(
-            height: 100,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: kPopularDestinations.length,
-              separatorBuilder: (_, _) => const SizedBox(width: 18),
-              itemBuilder: (_, i) =>
-                  _DestinationItem(destination: kPopularDestinations[i]),
+          // Điểm đến phổ biến (từ API) — ẩn khi chưa có dữ liệu.
+          if (hotelN.destinations.isNotEmpty) ...[
+            const SizedBox(height: 28),
+            _SectionTitle(title: 'Popular Destinations'),
+            const SizedBox(height: 14),
+            SizedBox(
+              height: 100,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: hotelN.destinations.length,
+                separatorBuilder: (_, _) => const SizedBox(width: 18),
+                itemBuilder: (_, i) =>
+                    _DestinationItem(destination: hotelN.destinations[i]),
+              ),
             ),
-          ),
+          ],
           const SizedBox(height: 28),
           _SectionTitle(
             title: 'Featured Hotels',

@@ -47,6 +47,8 @@ class ApiConstants {
 
   // ---- Hotel ----
   static const String hotels = '/hotels'; // GET tìm/danh sách khách sạn
+  static const String hotelDestinations =
+      '/hotels/destinations'; // GET điểm đến phổ biến
   static String hotelById(String hotelId) => '/hotels/$hotelId'; // GET chi tiết
 
   // ---- Room types (loại phòng của 1 khách sạn) ----

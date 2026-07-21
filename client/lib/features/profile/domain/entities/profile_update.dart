@@ -26,6 +26,12 @@ class ProfileUpdate extends Equatable {
 
   final bool? marketingOptIn;
 
+  /// Gu du lịch mới (thay toàn bộ danh sách cũ). Null = không đụng.
+  final List<String>? travelStyles;
+
+  /// Tuỳ chọn thông báo mới (thay toàn bộ). Null = không đụng.
+  final Map<String, bool>? notificationPrefs;
+
   const ProfileUpdate({
     this.fullName,
     this.phone,
@@ -37,6 +43,8 @@ class ProfileUpdate extends Equatable {
     this.preferredLanguage,
     this.preferredCurrency,
     this.marketingOptIn,
+    this.travelStyles,
+    this.notificationPrefs,
   });
 
   /// Không có gì để gửi → tránh gọi API và dính lỗi 400 "min 1 key".
@@ -50,7 +58,9 @@ class ProfileUpdate extends Equatable {
       passportNumber == null &&
       preferredLanguage == null &&
       preferredCurrency == null &&
-      marketingOptIn == null;
+      marketingOptIn == null &&
+      travelStyles == null &&
+      notificationPrefs == null;
 
   @override
   List<Object?> get props => [
@@ -64,5 +74,7 @@ class ProfileUpdate extends Equatable {
     preferredLanguage,
     preferredCurrency,
     marketingOptIn,
+    travelStyles,
+    notificationPrefs,
   ];
 }
