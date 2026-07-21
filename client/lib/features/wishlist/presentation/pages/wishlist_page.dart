@@ -1,14 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:smart_stay_ai/core/di/injection.dart';
 import 'package:smart_stay_ai/core/router/app_router.dart';
 import 'package:smart_stay_ai/core/theme/app_theme.dart';
 import 'package:smart_stay_ai/core/widgets/app_network_image.dart';
 import 'package:smart_stay_ai/features/hotel/domain/entities/hotel.dart';
+import 'package:smart_stay_ai/features/wishlist/presentation/providers/wishlist_notifier.dart';
 
-/// Trang "My Wishlist": danh sách khách sạn đã lưu.
-///
-/// NOTE: hiện dùng dữ liệu mẫu [_demoHotels] + state cục bộ (setState).
-/// Khi có backend, hãy chuyển sang WishlistNotifier (ChangeNotifier) + UseCase.
+/// Trang "My Wishlist": danh sách khách sạn đã lưu (LOCAL, shared_preferences).
 class WishlistPage extends StatefulWidget {
   const WishlistPage({super.key});
 
@@ -19,19 +18,39 @@ class WishlistPage extends StatefulWidget {
 class _WishlistPageState extends State<WishlistPage> {
   static const _filters = ['All', 'Summer Trip', 'Honeymoon'];
 
-  late List<Hotel> _saved = List.of(_demoHotels);
+  // Singleton dùng chung với trang chi tiết — không dispose ở đây.
+  final WishlistNotifier _wishlistN = sl<WishlistNotifier>();
   int _filter = 0;
 
-  void _remove(Hotel hotel) => setState(() => _saved.remove(hotel));
+  @override
+  void initState() {
+    super.initState();
+    _wishlistN.addListener(_onChanged);
+    // Luôn nạp lại khi mở tab để phản ánh thứ vừa lưu ở màn khác.
+    _wishlistN.load();
+  }
 
-  void _restore() => setState(() => _saved = List.of(_demoHotels));
+  void _onChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _wishlistN.removeListener(_onChanged);
+    super.dispose();
+  }
+
+  void _remove(Hotel hotel) => _wishlistN.toggle(hotel);
 
   void _openDetail(Hotel hotel) {
     context.push(AppRoutes.hotelDetail, extra: hotel);
   }
 
+  void _openSearch() => context.push(AppRoutes.hotelSearch);
+
   @override
   Widget build(BuildContext context) {
+    final saved = _wishlistN.hotels;
     return SafeArea(
       child: Column(
         children: [
@@ -46,10 +65,15 @@ class _WishlistPageState extends State<WishlistPage> {
                 const SizedBox(height: 20),
                 _filterChips(),
                 const SizedBox(height: 20),
-                if (_saved.isEmpty)
-                  _EmptyState(onExplore: _restore)
+                if (_wishlistN.isLoading && saved.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 40),
+                    child: Center(child: CircularProgressIndicator()),
+                  )
+                else if (saved.isEmpty)
+                  _EmptyState(onExplore: _openSearch)
                 else
-                  ..._saved.map(
+                  ...saved.map(
                     (h) => Padding(
                       padding: const EdgeInsets.only(bottom: 20),
                       child: _WishlistCard(
@@ -96,7 +120,7 @@ class _WishlistPageState extends State<WishlistPage> {
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Text(
-                      '${_saved.length} saved',
+                      '${_wishlistN.hotels.length} saved',
                       style: const TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
@@ -503,46 +527,3 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
-/// Dữ liệu mẫu — thay bằng dữ liệu thật từ API khi backend sẵn sàng.
-const _demoHotels = <Hotel>[
-  Hotel(
-    id: '1',
-    name: 'The Azure Resort',
-    location: 'Santorini, Greece',
-    imageUrl:
-        'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800',
-    rating: 4.9,
-    reviewCount: 210,
-    pricePerNight: 450,
-    oldPrice: 550,
-    description:
-        'Khu nghỉ dưỡng bên bờ biển Aegean với hồ bơi vô cực hướng hoàng hôn, '
-        'spa cao cấp và không gian riêng tư tuyệt đối.',
-    amenities: ['WiFi', 'Pool', 'Spa', 'Gym', 'Restaurant', 'Private Beach'],
-    images: [
-      'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800',
-      'https://images.unsplash.com/photo-1505693416388-ac5ce068fe85?w=800',
-      'https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?w=800',
-      'https://images.unsplash.com/photo-1520250497591-112f2f40a3f4?w=800',
-    ],
-  ),
-  Hotel(
-    id: '2',
-    name: "Villa d'Este",
-    location: 'Lake Como, Italy',
-    imageUrl:
-        'https://images.unsplash.com/photo-1566073771259-6a8506099945?w=800',
-    rating: 4.8,
-    reviewCount: 156,
-    pricePerNight: 820,
-    description:
-        'Biệt thự cổ điển bên hồ Como với khu vườn Phục Hưng, nhà hàng tinh tế '
-        'và tầm nhìn ra dãy Alps.',
-    amenities: ['WiFi', 'Pool', 'Spa', 'Restaurant'],
-    images: [
-      'https://images.unsplash.com/photo-1566073771259-6a8506099945?w=800',
-      'https://images.unsplash.com/photo-1551882547-ff40c63fe5fa?w=800',
-      'https://images.unsplash.com/photo-1571896349842-33c89424de2d?w=800',
-    ],
-  ),
-];

@@ -62,6 +62,12 @@ import 'package:smart_stay_ai/features/rooms/domain/repositories/room_repository
 import 'package:smart_stay_ai/features/rooms/domain/usecases/get_room_types.dart';
 import 'package:smart_stay_ai/features/rooms/domain/usecases/get_room_type_detail.dart';
 import 'package:smart_stay_ai/features/rooms/presentation/providers/room_notifier.dart';
+import 'package:smart_stay_ai/features/wishlist/data/datasources/wishlist_local_data_source.dart';
+import 'package:smart_stay_ai/features/wishlist/data/repositories/wishlist_repository_impl.dart';
+import 'package:smart_stay_ai/features/wishlist/domain/repositories/wishlist_repository.dart';
+import 'package:smart_stay_ai/features/wishlist/domain/usecases/get_wishlist.dart';
+import 'package:smart_stay_ai/features/wishlist/domain/usecases/toggle_wishlist.dart';
+import 'package:smart_stay_ai/features/wishlist/presentation/providers/wishlist_notifier.dart';
 
 /// "Service Locator" — nơi khai báo mọi phụ thuộc của app.
 final sl = GetIt.instance;
@@ -229,6 +235,18 @@ Future<void> initDependencies() async {
   sl.registerLazySingleton(() => GetRoomTypeDetail(sl()));
   // Factory: mỗi màn danh sách phòng gắn với một hotelId riêng.
   sl.registerFactory(() => RoomNotifier(sl()));
+
+  // ---- Feature: wishlist (lưu LOCAL — backend chưa có API) ----
+  sl.registerLazySingleton<WishlistLocalDataSource>(
+    () => WishlistLocalDataSourceImpl(prefs),
+  );
+  sl.registerLazySingleton<WishlistRepository>(
+    () => WishlistRepositoryImpl(sl()),
+  );
+  sl.registerLazySingleton(() => GetWishlist(sl()));
+  sl.registerLazySingleton(() => ToggleWishlist(sl()));
+  // Singleton: trái tim ở Detail/Card/tab Wishlist luôn đồng bộ.
+  sl.registerLazySingleton(() => WishlistNotifier(sl(), sl()));
 
   // ---- Dọn dữ liệu khi đăng xuất ----
   // Mọi notifier ở trên đều là lazy singleton, sống suốt vòng đời tiến trình.
