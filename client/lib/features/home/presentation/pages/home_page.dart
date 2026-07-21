@@ -11,6 +11,7 @@ import 'package:smart_stay_ai/features/hotel/domain/entities/hotel.dart';
 import 'package:smart_stay_ai/features/hotel/presentation/demo_hotels.dart';
 import 'package:smart_stay_ai/features/hotel/presentation/providers/hotel_notifier.dart';
 import 'package:smart_stay_ai/features/hotel/presentation/widgets/hotel_card.dart';
+import 'package:smart_stay_ai/features/wishlist/presentation/providers/wishlist_notifier.dart';
 
 /// Trang chủ (tab Home): lời chào, ô tìm kiếm, gợi ý AI, điểm đến phổ biến
 /// và danh sách khách sạn nổi bật.
@@ -25,12 +26,26 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   final _hotelN = sl<HotelNotifier>();
+  // Singleton wishlist — trái tim trên thẻ đồng bộ với tab Wishlist.
+  final _wishlistN = sl<WishlistNotifier>();
 
   @override
   void initState() {
     super.initState();
     // Tải danh sách khách sạn 1 lần (singleton dùng chung Home/Search/Map).
     if (_hotelN.status == HotelStatus.initial) _hotelN.load();
+    _wishlistN.addListener(_onWishlist);
+    if (_wishlistN.status == WishlistStatus.initial) _wishlistN.load();
+  }
+
+  void _onWishlist() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _wishlistN.removeListener(_onWishlist);
+    super.dispose();
   }
 
   void _openHotel(BuildContext context, Hotel hotel) {
@@ -131,8 +146,12 @@ class _HomePageState extends State<HomePage> {
             ...featured.map(
               (h) => Padding(
                 padding: const EdgeInsets.only(bottom: 18),
-                child:
-                    HotelCard(hotel: h, onTap: () => _openHotel(context, h)),
+                child: HotelCard(
+                  hotel: h,
+                  onTap: () => _openHotel(context, h),
+                  saved: _wishlistN.isSaved(h.id),
+                  onToggleSaved: () => _wishlistN.toggle(h),
+                ),
               ),
             ),
               ],

@@ -7,6 +7,7 @@ import 'package:smart_stay_ai/features/hotel/domain/entities/hotel.dart';
 import 'package:smart_stay_ai/features/hotel/presentation/models/hotel_filter.dart';
 import 'package:smart_stay_ai/features/hotel/presentation/providers/hotel_notifier.dart';
 import 'package:smart_stay_ai/features/hotel/presentation/widgets/hotel_card.dart';
+import 'package:smart_stay_ai/features/wishlist/presentation/providers/wishlist_notifier.dart';
 
 /// Màn kết quả tìm kiếm khách sạn: ô search, nút Filter & Sort, nút Map View
 /// và danh sách thẻ khách sạn đã lọc/sắp xếp.
@@ -22,6 +23,8 @@ class HotelSearchPage extends StatefulWidget {
 class _HotelSearchPageState extends State<HotelSearchPage> {
   // Singleton dùng chung với Home/Map — nếu Home đã tải thì không gọi API lại.
   final HotelNotifier _hotelN = sl<HotelNotifier>();
+  // Singleton wishlist — để trái tim trên thẻ đồng bộ với tab Wishlist.
+  final WishlistNotifier _wishlistN = sl<WishlistNotifier>();
   late final TextEditingController _queryCtrl =
       TextEditingController(text: widget.initialQuery);
   HotelFilter _filter = const HotelFilter();
@@ -30,7 +33,9 @@ class _HotelSearchPageState extends State<HotelSearchPage> {
   void initState() {
     super.initState();
     _hotelN.addListener(_onHotels);
+    _wishlistN.addListener(_onHotels);
     if (_hotelN.status == HotelStatus.initial) _hotelN.load();
+    if (_wishlistN.status == WishlistStatus.initial) _wishlistN.load();
   }
 
   void _onHotels() {
@@ -40,6 +45,7 @@ class _HotelSearchPageState extends State<HotelSearchPage> {
   @override
   void dispose() {
     _hotelN.removeListener(_onHotels);
+    _wishlistN.removeListener(_onHotels);
     _queryCtrl.dispose();
     super.dispose();
   }
@@ -113,6 +119,8 @@ class _HotelSearchPageState extends State<HotelSearchPage> {
       itemBuilder: (_, i) => HotelCard(
         hotel: results[i],
         onTap: () => _openHotel(results[i]),
+        saved: _wishlistN.isSaved(results[i].id),
+        onToggleSaved: () => _wishlistN.toggle(results[i]),
       ),
     );
   }
