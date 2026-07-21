@@ -54,6 +54,12 @@ import 'package:smart_stay_ai/features/hotel/domain/usecases/search_hotels.dart'
 import 'package:smart_stay_ai/features/hotel/domain/usecases/get_hotel_detail.dart';
 import 'package:smart_stay_ai/features/hotel/presentation/providers/hotel_notifier.dart';
 import 'package:smart_stay_ai/features/hotel/presentation/providers/hotel_detail_notifier.dart';
+import 'package:smart_stay_ai/features/rooms/data/datasources/room_remote_data_source.dart';
+import 'package:smart_stay_ai/features/rooms/data/repositories/room_repository_impl.dart';
+import 'package:smart_stay_ai/features/rooms/domain/repositories/room_repository.dart';
+import 'package:smart_stay_ai/features/rooms/domain/usecases/get_room_types.dart';
+import 'package:smart_stay_ai/features/rooms/domain/usecases/get_room_type_detail.dart';
+import 'package:smart_stay_ai/features/rooms/presentation/providers/room_notifier.dart';
 
 /// "Service Locator" — nơi khai báo mọi phụ thuộc của app.
 final sl = GetIt.instance;
@@ -208,6 +214,16 @@ Future<void> initDependencies() async {
   sl.registerLazySingleton(() => HotelNotifier(sl()));
   // Factory: mỗi trang chi tiết là một phiên riêng.
   sl.registerFactory(() => HotelDetailNotifier(sl()));
+
+  // ---- Feature: rooms (loại phòng — API thật) ----
+  sl.registerLazySingleton<RoomRemoteDataSource>(
+    () => RoomRemoteDataSourceImpl(sl()),
+  );
+  sl.registerLazySingleton<RoomRepository>(() => RoomRepositoryImpl(sl()));
+  sl.registerLazySingleton(() => GetRoomTypes(sl()));
+  sl.registerLazySingleton(() => GetRoomTypeDetail(sl()));
+  // Factory: mỗi màn danh sách phòng gắn với một hotelId riêng.
+  sl.registerFactory(() => RoomNotifier(sl()));
 
   // ---- Dọn dữ liệu khi đăng xuất ----
   // Mọi notifier ở trên đều là lazy singleton, sống suốt vòng đời tiến trình.
