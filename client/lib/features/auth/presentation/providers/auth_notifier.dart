@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:fpdart/fpdart.dart';
 import 'package:smart_stay_ai/core/error/failures.dart';
+import 'package:smart_stay_ai/core/session/app_session.dart';
 import 'package:smart_stay_ai/core/usecase/usecase.dart';
 import 'package:smart_stay_ai/features/auth/domain/entities/auth_tokens.dart';
 import 'package:smart_stay_ai/features/auth/domain/entities/user.dart';
@@ -31,7 +32,12 @@ class AuthNotifier extends ChangeNotifier {
   final SendVerificationEmail sendVerificationEmailUseCase;
   final VerifyEmail verifyEmailUseCase;
 
+  /// Nơi giữ trạng thái phiên chung của app: router lắng nghe nó để quyết định
+  /// chặn/cho vào màn hình, và nó cũng chịu trách nhiệm dọn dữ liệu khi logout.
+  final AppSession session;
+
   AuthNotifier({
+    required this.session,
     required this.loginUser,
     required this.registerUser,
     required this.logoutUser,
@@ -58,34 +64,44 @@ class AuthNotifier extends ChangeNotifier {
 
   bool get isActionLoading => actionStatus == AuthStatus.loading;
 
-  Future<void> login({
-    required String email,
-    required String password,
-  }) async {
+  Future<void> login({required String email, required String password}) async {
     _setLoading();
     final result = await loginUser(
       LoginParams(email: email, password: password),
     );
-    result.fold(_onFailure, (session) {
+    result.fold(_onFailure, (authSession) {
       status = AuthStatus.success;
-      user = session.user;
-      tokens = session.tokens;
+      user = authSession.user;
+      tokens = authSession.tokens;
+      session.onSignedIn();
     });
     notifyListeners();
   }
 
+  /// [verificationCode]: mã OTP 6 chữ số lấy từ [sendOtp].
+  /// Server trả kèm token nên đăng ký xong là đã đăng nhập.
   Future<void> register({
     required String name,
     required String email,
     required String password,
+    required String verificationCode,
+    String? phone,
   }) async {
     _setLoading();
     final result = await registerUser(
-      RegisterParams(name: name, email: email, password: password),
+      RegisterParams(
+        name: name,
+        email: email,
+        password: password,
+        verificationCode: verificationCode,
+        phone: phone,
+      ),
     );
-    result.fold(_onFailure, (u) {
+    result.fold(_onFailure, (authSession) {
       status = AuthStatus.success;
-      user = u;
+      user = authSession.user;
+      tokens = authSession.tokens;
+      session.onSignedIn();
     });
     notifyListeners();
   }
@@ -93,11 +109,13 @@ class AuthNotifier extends ChangeNotifier {
   Future<void> logout() async {
     _setLoading();
     final result = await logoutUser(const NoParams());
-    result.fold(_onFailure, (_) {
-      status = AuthStatus.initial;
-      user = null;
-      tokens = null;
-    });
+    result.fold(_onFailure, (_) => status = AuthStatus.initial);
+    // Repository xoá token cục bộ trong `finally` dù server trả lỗi, nên phiên
+    // coi như đã kết thúc trong mọi trường hợp — phải dọn state theo, không thì
+    // người đăng nhập kế tiếp vẫn thấy dữ liệu của người trước.
+    user = null;
+    tokens = null;
+    session.onSignedOut();
     notifyListeners();
   }
 
@@ -112,9 +130,7 @@ class AuthNotifier extends ChangeNotifier {
   }
 
   Future<void> forgotPassword({required String email}) async {
-    await _runAction(
-      forgotPasswordUseCase(ForgotPasswordParams(email: email)),
-    );
+    await _runAction(forgotPasswordUseCase(ForgotPasswordParams(email: email)));
   }
 
   Future<void> resetPassword({
@@ -128,10 +144,9 @@ class AuthNotifier extends ChangeNotifier {
     );
   }
 
-  Future<void> sendVerificationEmail({required String email}) async {
-    await _runAction(
-      sendVerificationEmailUseCase(SendVerificationEmailParams(email: email)),
-    );
+  /// Chỉ gọi được khi đã đăng nhập — server lấy user từ access token.
+  Future<void> sendVerificationEmail() async {
+    await _runAction(sendVerificationEmailUseCase(const NoParams()));
   }
 
   Future<void> verifyEmail({required String token}) async {
@@ -144,13 +159,10 @@ class AuthNotifier extends ChangeNotifier {
     notifyListeners();
 
     final result = await future;
-    result.fold(
-      (failure) {
-        actionStatus = AuthStatus.error;
-        actionErrorMessage = failure.message;
-      },
-      (_) => actionStatus = AuthStatus.success,
-    );
+    result.fold((failure) {
+      actionStatus = AuthStatus.error;
+      actionErrorMessage = failure.message;
+    }, (_) => actionStatus = AuthStatus.success);
     notifyListeners();
   }
 

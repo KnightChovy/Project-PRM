@@ -1,17 +1,58 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
 
+import '../../../../core/di/injection.dart';
 import '../../../../core/router/app_router.dart';
+import '../../../../core/session/app_session.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../../auth/presentation/providers/auth_notifier.dart';
+import '../../../wishlist/presentation/providers/wishlist_notifier.dart';
+import '../../domain/entities/user_profile.dart';
+import '../providers/profile_notifier.dart';
 import 'change_password_page.dart';
 import 'edit_profile_page.dart';
 import 'help_support_page.dart';
 import 'notification_settings_page.dart';
 
-/// Profile screen — static display + navigation entry points.
-/// ponytail: local-only; wire a profile bloc when it actually loads from the API.
-class ProfilePage extends StatelessWidget {
+/// Màn Profile — hiển thị hồ sơ thật từ `GET /v1/users/me`.
+///
+/// Các khối Loyalty / Stats / Travel Style vẫn là số liệu mẫu: backend chưa có
+/// API điểm thưởng hay thống kê chuyến đi (xem chú thích tại từng widget).
+class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
+
+  @override
+  State<ProfilePage> createState() => _ProfilePageState();
+}
+
+class _ProfilePageState extends State<ProfilePage> {
+  /// Singleton dùng chung với Edit Profile / Notification Settings nên phải
+  /// provide bằng `.value`, không để provider dispose nó.
+  final _notifier = sl<ProfileNotifier>();
+  // Singleton wishlist — cung cấp số "Saved". Nullable để test hồ sơ (không
+  // đăng ký wishlist trong DI) vẫn dựng được màn.
+  final WishlistNotifier? _wishlistN =
+      sl.isRegistered<WishlistNotifier>() ? sl<WishlistNotifier>() : null;
+
+  @override
+  void initState() {
+    super.initState();
+    // Khách vãng lai không có hồ sơ để tải — gọi API chỉ tổ nhận 401.
+    if (sl<AppSession>().isSignedIn) _notifier.load();
+    _wishlistN?.addListener(_onWishlist);
+    if (_wishlistN?.status == WishlistStatus.initial) _wishlistN!.load();
+  }
+
+  void _onWishlist() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _wishlistN?.removeListener(_onWishlist);
+    super.dispose();
+  }
 
   /// Hỏi xác nhận rồi đăng xuất: xoá toàn bộ stack và quay về màn đăng nhập.
   Future<void> _confirmLogout(BuildContext context) async {
@@ -34,7 +75,13 @@ class ProfilePage extends StatelessWidget {
       ),
     );
 
-    if (shouldLogout != true || !context.mounted) return;
+    if (shouldLogout != true) return;
+
+    // Gọi API thu hồi phiên + xoá token dưới máy. Trước đây màn này chỉ điều
+    // hướng về login nên phiên vẫn sống và token vẫn nằm trong SharedPreferences.
+    await sl<AuthNotifier>().logout();
+
+    if (!context.mounted) return;
     // go() thay vì push() để dọn sạch lịch sử điều hướng sau khi đăng xuất.
     context.go(AppRoutes.login);
   }
@@ -42,100 +89,183 @@ class ProfilePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
-    return Scaffold(
-      appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.menu),
-          onPressed: () {},
-        ),
-        title: Text('SmartStay', style: t.headlineLarge?.copyWith(color: AppTheme.primary)),
-        centerTitle: true,
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 16),
-            child: CircleAvatar(
-              radius: 16,
-              backgroundColor: AppTheme.surfaceVariant,
-              child: const Icon(Icons.person, size: 20, color: AppTheme.onSurfaceVariant),
-            ),
+    return ChangeNotifierProvider.value(
+      value: _notifier,
+      child: Scaffold(
+        appBar: AppBar(
+          leading: IconButton(icon: const Icon(Icons.menu), onPressed: () {}),
+          title: Text(
+            'SmartStay',
+            style: t.headlineLarge?.copyWith(color: AppTheme.primary),
           ),
-        ],
-      ),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
-          children: [
-            const _ProfileHeader(),
-            const SizedBox(height: 40),
-            const _LoyaltyCard(),
-            const SizedBox(height: 40),
-            const _StatsRow(),
-            const SizedBox(height: 40),
-            const _TravelStyle(),
-            const SizedBox(height: 40),
-            const _MenuList(),
-            const SizedBox(height: 32),
-            FilledButton(
-              style: FilledButton.styleFrom(
-                backgroundColor: AppTheme.errorContainer.withValues(alpha: 0.4),
-                foregroundColor: AppTheme.error,
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              ),
-              onPressed: () => _confirmLogout(context),
-              child: const Text('Log Out', style: TextStyle(fontWeight: FontWeight.w500)),
-            ),
-            const SizedBox(height: 16),
-            Center(
-              child: Text(
-                'Version 4.12.0',
-                style: t.labelSmall?.copyWith(
-                  color: AppTheme.onSurfaceVariant.withValues(alpha: 0.6),
-                ),
+          centerTitle: true,
+          actions: [
+            Padding(
+              padding: const EdgeInsets.only(right: 16),
+              child: Consumer<ProfileNotifier>(
+                builder: (context, notifier, _) =>
+                    _Avatar(url: notifier.profile?.avatarUrl, radius: 16),
               ),
             ),
           ],
+        ),
+        body: SafeArea(
+          child: Consumer2<AppSession, ProfileNotifier>(
+            builder: (context, session, notifier, _) {
+              final signedIn = session.isSignedIn;
+              return RefreshIndicator(
+                // Khách vãng lai kéo xuống cũng không có gì để tải.
+                onRefresh: signedIn ? notifier.load : () async {},
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
+                  children: [
+                    _ProfileHeader(notifier: notifier),
+                    const SizedBox(height: 40),
+                    // Điểm thưởng, thống kê, menu tài khoản và nút đăng xuất
+                    // đều vô nghĩa khi chưa có tài khoản — ẩn hẳn thay vì hiện
+                    // ra rồi báo lỗi lúc chạm vào.
+                    if (signedIn) ...[
+                      if (notifier.profile != null) ...[
+                        _LoyaltyCard(profile: notifier.profile!),
+                        const SizedBox(height: 40),
+                        _StatsRow(
+                          trips: notifier.profile!.tripsCount,
+                          reviews: notifier.profile!.reviewsCount,
+                          saved: _wishlistN?.hotels.length ?? 0,
+                        ),
+                        const SizedBox(height: 40),
+                        _TravelStyle(styles: notifier.profile!.travelStyles),
+                        const SizedBox(height: 40),
+                      ],
+                      const _MenuList(),
+                      const SizedBox(height: 32),
+                      FilledButton(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppTheme.errorContainer.withValues(
+                            alpha: 0.4,
+                          ),
+                          foregroundColor: AppTheme.error,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                        ),
+                        onPressed: () => _confirmLogout(context),
+                        child: const Text(
+                          'Log Out',
+                          style: TextStyle(fontWeight: FontWeight.w500),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+                    Center(
+                      child: Text(
+                        'Version 4.12.0',
+                        style: t.labelSmall?.copyWith(
+                          color: AppTheme.onSurfaceVariant.withValues(
+                            alpha: 0.6,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
         ),
       ),
     );
   }
 }
 
+/// Ảnh đại diện: dùng `avatarUrl` khi có, ngược lại vẽ icon người mặc định.
+class _Avatar extends StatelessWidget {
+  const _Avatar({required this.url, required this.radius});
+
+  final String? url;
+  final double radius;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasImage = url != null && url!.isNotEmpty;
+    return CircleAvatar(
+      radius: radius,
+      backgroundColor: AppTheme.surfaceVariant,
+      foregroundImage: hasImage ? NetworkImage(url!) : null,
+      child: hasImage
+          ? null
+          : Icon(
+              Icons.person,
+              size: radius * 1.25,
+              color: AppTheme.onSurfaceVariant,
+            ),
+    );
+  }
+}
+
+/// Tên + email thật của người đang đăng nhập.
 class _ProfileHeader extends StatelessWidget {
-  const _ProfileHeader();
+  const _ProfileHeader({required this.notifier});
+
+  final ProfileNotifier notifier;
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
+    final profile = notifier.profile;
+
+    // Khách vãng lai: không có hồ sơ nào để chờ, mời đăng nhập luôn thay vì
+    // quay vòng tải mãi mãi.
+    if (!sl<AppSession>().isSignedIn) {
+      return const _GuestHeader();
+    }
+
+    // Lần tải đầu chưa có dữ liệu → chừa chỗ để layout không nhảy.
+    if (profile == null) {
+      return SizedBox(
+        height: 220,
+        child: Center(
+          child: notifier.status == ProfileStatus.error
+              ? _LoadError(
+                  message: notifier.errorMessage ?? 'Không tải được hồ sơ.',
+                  onRetry: notifier.load,
+                )
+              : const CircularProgressIndicator(),
+        ),
+      );
+    }
+
     return Column(
       children: [
-        Container(
-          width: 96,
-          height: 96,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: AppTheme.surfaceVariant,
-            boxShadow: const [
-              BoxShadow(color: Color(0x0A1C1B1B), blurRadius: 20, offset: Offset(0, 4)),
-            ],
-          ),
-          child: const Icon(Icons.person, size: 48, color: AppTheme.onSurfaceVariant),
-        ),
+        _Avatar(url: profile.avatarUrl, radius: 48),
         const SizedBox(height: 16),
-        Text('Alex Sterling', style: t.headlineLarge),
+        Text(profile.fullName, style: t.headlineLarge),
         const SizedBox(height: 4),
-        Text('alex.sterling@example.com',
-            style: t.bodyMedium?.copyWith(color: AppTheme.onSurfaceVariant)),
+        Text(
+          profile.email,
+          style: t.bodyMedium?.copyWith(color: AppTheme.onSurfaceVariant),
+        ),
+        if (!profile.isEmailVerified) ...[
+          const SizedBox(height: 8),
+          Text(
+            'Email chưa xác thực',
+            style: t.labelSmall?.copyWith(color: AppTheme.error),
+          ),
+        ],
         const SizedBox(height: 16),
         OutlinedButton(
           style: OutlinedButton.styleFrom(
             side: const BorderSide(color: AppTheme.outline),
             foregroundColor: AppTheme.onBackground,
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(32)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(32),
+            ),
           ),
-          onPressed: () => Navigator.of(context)
-              .push(MaterialPageRoute(builder: (_) => const EditProfilePage())),
+          onPressed: () => Navigator.of(
+            context,
+          ).push(MaterialPageRoute(builder: (_) => const EditProfilePage())),
           child: const Text('Edit Profile'),
         ),
       ],
@@ -143,8 +273,97 @@ class _ProfileHeader extends StatelessWidget {
   }
 }
 
+/// Trạng thái Profile của khách chưa đăng nhập.
+class _GuestHeader extends StatelessWidget {
+  const _GuestHeader();
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    return Column(
+      children: [
+        const _Avatar(url: null, radius: 48),
+        const SizedBox(height: 16),
+        Text('Bạn chưa đăng nhập', style: t.headlineMedium),
+        const SizedBox(height: 8),
+        Text(
+          'Đăng nhập để quản lý hồ sơ, chuyến đi và danh sách yêu thích.',
+          textAlign: TextAlign.center,
+          style: t.bodyMedium?.copyWith(color: AppTheme.onSurfaceVariant),
+        ),
+        const SizedBox(height: 20),
+        FilledButton(
+          style: FilledButton.styleFrom(
+            backgroundColor: AppTheme.secondary,
+            foregroundColor: AppTheme.onSecondary,
+            minimumSize: const Size(220, 52),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          ),
+          onPressed: () => context.push(AppRoutes.login),
+          child: const Text('Đăng nhập'),
+        ),
+        const SizedBox(height: 8),
+        TextButton(
+          onPressed: () => context.push(AppRoutes.register),
+          child: const Text('Chưa có tài khoản? Đăng ký'),
+        ),
+      ],
+    );
+  }
+}
+
+/// Báo lỗi tải hồ sơ kèm nút thử lại.
+class _LoadError extends StatelessWidget {
+  const _LoadError({required this.message, required this.onRetry});
+
+  final String message;
+  final Future<void> Function() onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(Icons.cloud_off, size: 40, color: AppTheme.onSurfaceVariant),
+        const SizedBox(height: 12),
+        Text(
+          message,
+          textAlign: TextAlign.center,
+          style: Theme.of(
+            context,
+          ).textTheme.bodyMedium?.copyWith(color: AppTheme.onSurfaceVariant),
+        ),
+        const SizedBox(height: 12),
+        TextButton(onPressed: onRetry, child: const Text('Thử lại')),
+      ],
+    );
+  }
+}
+
+/// Điểm thưởng + hạng thành viên thật (từ `loyaltyAccount` của `GET /users/me`).
 class _LoyaltyCard extends StatelessWidget {
-  const _LoyaltyCard();
+  const _LoyaltyCard({required this.profile});
+
+  final UserProfile profile;
+
+  /// bronze -> "Bronze" (viết hoa chữ đầu để ghép "SmartStay Gold").
+  String get _tierLabel {
+    final tier = profile.loyaltyTier;
+    if (tier.isEmpty) return 'Bronze';
+    return '${tier[0].toUpperCase()}${tier.substring(1)}';
+  }
+
+  /// 2450 -> "2,450".
+  String get _points {
+    final s = profile.loyaltyPoints.toString();
+    final buf = StringBuffer();
+    for (var i = 0; i < s.length; i++) {
+      if (i > 0 && (s.length - i) % 3 == 0) buf.write(',');
+      buf.write(s[i]);
+    }
+    return buf.toString();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -177,16 +396,27 @@ class _LoyaltyCard extends StatelessWidget {
                   const SizedBox(height: 4),
                   Row(
                     children: [
-                      Text('SmartStay Gold',
-                          style: t.headlineMedium?.copyWith(color: AppTheme.onTertiaryFixed)),
+                      Text(
+                        'SmartStay $_tierLabel',
+                        style: t.headlineMedium?.copyWith(
+                          color: AppTheme.onTertiaryFixed,
+                        ),
+                      ),
                       const SizedBox(width: 8),
-                      const Icon(Icons.stars, size: 20, color: AppTheme.onTertiaryFixed),
+                      const Icon(
+                        Icons.stars,
+                        size: 20,
+                        color: AppTheme.onTertiaryFixed,
+                      ),
                     ],
                   ),
                 ],
               ),
-              Icon(Icons.diamond,
-                  size: 32, color: AppTheme.onTertiaryFixed.withValues(alpha: 0.2)),
+              Icon(
+                Icons.diamond,
+                size: 32,
+                color: AppTheme.onTertiaryFixed.withValues(alpha: 0.2),
+              ),
             ],
           ),
           const SizedBox(height: 24),
@@ -197,20 +427,28 @@ class _LoyaltyCard extends StatelessWidget {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('2,450',
-                      style: t.displayLarge?.copyWith(color: AppTheme.onTertiaryFixed)),
+                  Text(
+                    _points,
+                    style: t.displayLarge?.copyWith(
+                      color: AppTheme.onTertiaryFixed,
+                    ),
+                  ),
                   const SizedBox(height: 4),
-                  Text('Available Points',
-                      style: t.labelLarge?.copyWith(
-                        color: AppTheme.onTertiaryFixed.withValues(alpha: 0.8),
-                      )),
+                  Text(
+                    'Available Points',
+                    style: t.labelLarge?.copyWith(
+                      color: AppTheme.onTertiaryFixed.withValues(alpha: 0.8),
+                    ),
+                  ),
                 ],
               ),
               FilledButton(
                 style: FilledButton.styleFrom(
                   backgroundColor: AppTheme.onTertiaryFixed,
                   foregroundColor: AppTheme.tertiaryFixed,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
                 ),
                 onPressed: () {},
                 child: const Text('Redeem'),
@@ -223,8 +461,17 @@ class _LoyaltyCard extends StatelessWidget {
   }
 }
 
+/// Thống kê thật: số chuyến (server), số đánh giá (server), số đã lưu (wishlist local).
 class _StatsRow extends StatelessWidget {
-  const _StatsRow();
+  const _StatsRow({
+    required this.trips,
+    required this.reviews,
+    required this.saved,
+  });
+
+  final int trips;
+  final int reviews;
+  final int saved;
 
   @override
   Widget build(BuildContext context) {
@@ -234,17 +481,21 @@ class _StatsRow extends StatelessWidget {
         color: AppTheme.surfaceContainerLowest,
         borderRadius: BorderRadius.circular(24),
         boxShadow: const [
-          BoxShadow(color: Color(0x0A1C1B1B), blurRadius: 20, offset: Offset(0, 4)),
+          BoxShadow(
+            color: Color(0x0A1C1B1B),
+            blurRadius: 20,
+            offset: Offset(0, 4),
+          ),
         ],
       ),
       child: IntrinsicHeight(
         child: Row(
-          children: const [
-            _Stat(value: '12', label: 'Stays'),
-            VerticalDivider(color: AppTheme.outlineVariant, width: 1),
-            _Stat(value: '8', label: 'Reviews'),
-            VerticalDivider(color: AppTheme.outlineVariant, width: 1),
-            _Stat(value: '5', label: 'Saved'),
+          children: [
+            _Stat(value: '$trips', label: 'Stays'),
+            const VerticalDivider(color: AppTheme.outlineVariant, width: 1),
+            _Stat(value: '$reviews', label: 'Reviews'),
+            const VerticalDivider(color: AppTheme.outlineVariant, width: 1),
+            _Stat(value: '$saved', label: 'Saved'),
           ],
         ),
       ),
@@ -264,15 +515,21 @@ class _Stat extends StatelessWidget {
       child: Column(
         children: [
           Text(value, style: t.headlineMedium),
-          Text(label, style: t.labelSmall?.copyWith(color: AppTheme.onSurfaceVariant)),
+          Text(
+            label,
+            style: t.labelSmall?.copyWith(color: AppTheme.onSurfaceVariant),
+          ),
         ],
       ),
     );
   }
 }
 
+/// Gu du lịch thật (từ `profile.travelStyles`). Chạm "+" để sửa ở Edit Profile.
 class _TravelStyle extends StatelessWidget {
-  const _TravelStyle();
+  const _TravelStyle({required this.styles});
+
+  final List<String> styles;
 
   @override
   Widget build(BuildContext context) {
@@ -283,7 +540,11 @@ class _TravelStyle extends StatelessWidget {
         color: AppTheme.surfaceContainerLowest,
         borderRadius: BorderRadius.circular(24),
         boxShadow: const [
-          BoxShadow(color: Color(0x0A1C1B1B), blurRadius: 20, offset: Offset(0, 4)),
+          BoxShadow(
+            color: Color(0x0A1C1B1B),
+            blurRadius: 20,
+            offset: Offset(0, 4),
+          ),
         ],
       ),
       child: Column(
@@ -293,21 +554,34 @@ class _TravelStyle extends StatelessWidget {
             children: [
               Text('Your Travel Style', style: t.headlineMedium),
               const SizedBox(width: 8),
-              const Icon(Icons.auto_awesome, color: AppTheme.secondary, size: 22),
+              const Icon(
+                Icons.auto_awesome,
+                color: AppTheme.secondary,
+                size: 22,
+              ),
             ],
           ),
           const SizedBox(height: 4),
-          Text('AI-curated based on your recent bookings.',
-              style: t.bodyMedium?.copyWith(color: AppTheme.onSurfaceVariant)),
+          Text(
+            styles.isEmpty
+                ? 'Chạm + để thêm gu du lịch của bạn.'
+                : 'Dựa trên lựa chọn của bạn.',
+            style: t.bodyMedium?.copyWith(color: AppTheme.onSurfaceVariant),
+          ),
           const SizedBox(height: 16),
           Wrap(
             spacing: 8,
             runSpacing: 8,
             children: [
-              _Chip(label: 'Beach Lover'),
-              _Chip(label: 'Business Traveler'),
-              _Chip(label: 'Budget Conscious'),
-              _Chip(label: '+', dashed: true),
+              for (final s in styles) _Chip(label: s),
+              GestureDetector(
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const EditProfilePage(),
+                  ),
+                ),
+                child: const _Chip(label: '+', dashed: true),
+              ),
             ],
           ),
         ],
@@ -335,8 +609,10 @@ class _Chip extends StatelessWidget {
       child: Text(
         label,
         style: Theme.of(context).textTheme.labelLarge?.copyWith(
-              color: dashed ? AppTheme.onSurfaceVariant : AppTheme.onPrimaryContainer,
-            ),
+          color: dashed
+              ? AppTheme.onSurfaceVariant
+              : AppTheme.onPrimaryContainer,
+        ),
       ),
     );
   }
@@ -348,9 +624,24 @@ class _MenuList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final items = <(int, IconData, String, Widget?)>[
-      (0, Icons.person_outline, 'Personal Information', null),
-      (1, Icons.lock_outline, 'Security & Password', const ChangePasswordPage()),
-      (2, Icons.notifications_outlined, 'Notification Settings', const NotificationSettingsPage()),
+      (
+        0,
+        Icons.person_outline,
+        'Personal Information',
+        const EditProfilePage(),
+      ),
+      (
+        1,
+        Icons.lock_outline,
+        'Security & Password',
+        const ChangePasswordPage(),
+      ),
+      (
+        2,
+        Icons.notifications_outlined,
+        'Notification Settings',
+        const NotificationSettingsPage(),
+      ),
       (3, Icons.language, 'Language & Region', null),
       (4, Icons.help_outline, 'Help & Support', const HelpSupportPage()),
     ];
@@ -359,21 +650,31 @@ class _MenuList extends StatelessWidget {
         color: AppTheme.surfaceContainerLowest,
         borderRadius: BorderRadius.circular(24),
         boxShadow: const [
-          BoxShadow(color: Color(0x0A1C1B1B), blurRadius: 20, offset: Offset(0, 4)),
+          BoxShadow(
+            color: Color(0x0A1C1B1B),
+            blurRadius: 20,
+            offset: Offset(0, 4),
+          ),
         ],
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(
         children: [
           for (final (i, icon, label, page) in items) ...[
-            if (i != 0) const Divider(height: 1, color: AppTheme.surfaceVariant),
+            if (i != 0)
+              const Divider(height: 1, color: AppTheme.surfaceVariant),
             ListTile(
               leading: Icon(icon, color: AppTheme.onSurfaceVariant),
               title: Text(label, style: Theme.of(context).textTheme.bodyLarge),
-              trailing: const Icon(Icons.chevron_right, color: AppTheme.outlineVariant),
+              trailing: const Icon(
+                Icons.chevron_right,
+                color: AppTheme.outlineVariant,
+              ),
               onTap: page == null
                   ? null
-                  : () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => page)),
+                  : () => Navigator.of(
+                      context,
+                    ).push(MaterialPageRoute(builder: (_) => page)),
             ),
           ],
         ],

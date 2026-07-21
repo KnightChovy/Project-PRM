@@ -461,6 +461,10 @@ model UserProfile {
   preferredLanguage PreferredLanguage @default(vi) @map("preferred_language")
   preferredCurrency PreferredCurrency @default(VND) @map("preferred_currency")
   marketingOptIn    Boolean           @default(false) @map("marketing_opt_in")
+  // Gu du lịch của khách (Beach, Luxury, Adventure...) — hiển thị ở màn Profile.
+  travelStyles      String[]          @default([]) @map("travel_styles")
+  // Tuỳ chọn bật/tắt từng loại thông báo (key -> bool). Null = dùng mặc định.
+  notificationPrefs Json?             @map("notification_prefs")
   createdAt         DateTime          @default(now()) @map("created_at")
   updatedAt         DateTime          @default(now()) @updatedAt @map("updated_at")
 

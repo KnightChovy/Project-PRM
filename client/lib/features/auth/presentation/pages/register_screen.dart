@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:smart_stay_ai/core/di/injection.dart';
 import 'package:smart_stay_ai/core/router/app_router.dart';
+import 'package:smart_stay_ai/features/auth/presentation/providers/auth_notifier.dart';
 import 'package:smart_stay_ai/core/theme/app_theme.dart';
+import 'package:smart_stay_ai/core/widgets/app_message_dialog.dart';
 
 /// Màn hình tạo tài khoản (bước 1 / 2).
 class RegisterScreen extends StatefulWidget {
@@ -17,10 +20,19 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _phoneCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
   final _confirmCtrl = TextEditingController();
+  final _codeCtrl = TextEditingController();
 
   bool _obscurePass = true;
   bool _obscureConfirm = true;
   bool _agreed = false;
+  bool _sendingCode = false;
+
+  /// Chặn bấm CREATE ACCOUNT nhiều lần.
+  ///
+  /// Server tiêu thụ mã OTP ngay ở lần gọi đầu, nên lần gọi thứ hai luôn báo
+  /// "Invalid or expired verification code" — người dùng thấy đăng ký thất bại
+  /// dù tài khoản đã được tạo thành công.
+  bool _creatingAccount = false;
 
   @override
   void dispose() {
@@ -29,11 +41,104 @@ class _RegisterScreenState extends State<RegisterScreen> {
     _phoneCtrl.dispose();
     _passCtrl.dispose();
     _confirmCtrl.dispose();
+    _codeCtrl.dispose();
     super.dispose();
   }
 
-  void _createAccount() {
-    context.push(AppRoutes.info);
+  /// Bước bắt buộc trước khi đăng ký: xin mã OTP 6 chữ số gửi về email.
+  Future<void> _sendCode() async {
+    final email = _emailCtrl.text.trim();
+    if (email.isEmpty) {
+      await _showError(
+        title: 'Email required',
+        message: 'Enter your email address first.',
+      );
+      return;
+    }
+
+    setState(() => _sendingCode = true);
+    final auth = sl<AuthNotifier>();
+    await auth.sendOtp(email: email);
+    if (!mounted) return;
+    setState(() => _sendingCode = false);
+
+    if (auth.actionStatus == AuthStatus.success) {
+      await showAppMessageDialog(
+        context,
+        type: AppMessageType.success,
+        title: 'Code sent',
+        message:
+            'We sent a 6-digit verification code to $email. '
+            'It expires in 10 minutes.',
+      );
+    } else {
+      // Email đã tồn tại, sai định dạng, lỗi gửi mail...
+      await _showError(
+        title: 'Could not send code',
+        message:
+            auth.actionErrorMessage ?? 'Unable to send the verification code.',
+      );
+    }
+  }
+
+  Future<void> _createAccount() async {
+    final name = _nameCtrl.text.trim();
+    final email = _emailCtrl.text.trim();
+    final password = _passCtrl.text;
+    final code = _codeCtrl.text.trim();
+
+    if (name.isEmpty || email.isEmpty || password.isEmpty) {
+      await _showError(
+        title: 'Missing information',
+        message: 'Please complete all required fields.',
+      );
+      return;
+    }
+    if (password != _confirmCtrl.text) {
+      await _showError(
+        title: 'Passwords do not match',
+        message: 'Re-enter the same password in both fields.',
+      );
+      return;
+    }
+    if (code.length != 6) {
+      await _showError(
+        title: 'Verification code required',
+        message: 'Enter the 6-digit code sent to your email.',
+      );
+      return;
+    }
+
+    if (_creatingAccount) return;
+    setState(() => _creatingAccount = true);
+
+    final auth = sl<AuthNotifier>();
+    await auth.register(
+      name: name,
+      email: email,
+      password: password,
+      verificationCode: code,
+      phone: _phoneCtrl.text.trim(),
+    );
+    if (!mounted) return;
+    setState(() => _creatingAccount = false);
+
+    if (auth.status == AuthStatus.success) {
+      context.push(AppRoutes.info);
+    } else if (auth.status == AuthStatus.error) {
+      // Mã OTP sai/hết hạn, email đã dùng, mật khẩu yếu... đều hiện ở đây.
+      await _showError(
+        title: 'Registration failed',
+        message: auth.errorMessage ?? 'Unable to create your account.',
+      );
+    }
+  }
+
+  Future<void> _showError({
+    String title = 'Something went wrong',
+    required String message,
+  }) {
+    return showAppErrorDialog(context, title: title, message: message);
   }
 
   @override
@@ -123,8 +228,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     _obscurePass ? Icons.visibility_off : Icons.visibility,
                     color: AppColors.textSecondary,
                   ),
-                  onPressed: () =>
-                      setState(() => _obscurePass = !_obscurePass),
+                  onPressed: () => setState(() => _obscurePass = !_obscurePass),
                 ),
               ),
               const SizedBox(height: 14),
@@ -140,6 +244,26 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   ),
                   onPressed: () =>
                       setState(() => _obscureConfirm = !_obscureConfirm),
+                ),
+              ),
+              const SizedBox(height: 14),
+              // Mã OTP: backend bắt buộc verificationCode 6 chữ số khi đăng ký.
+              _Field(
+                controller: _codeCtrl,
+                hint: '6-digit Verification Code',
+                icon: Icons.verified_outlined,
+                keyboardType: TextInputType.number,
+                maxLength: 6,
+                suffix: TextButton(
+                  onPressed: _sendingCode ? null : _sendCode,
+                  child: Text(
+                    _sendingCode ? 'SENDING…' : 'SEND CODE',
+                    style: const TextStyle(
+                      color: AppColors.goldDark,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                 ),
               ),
               const SizedBox(height: 16),
@@ -191,8 +315,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
               const SizedBox(height: 24),
               // Nút CREATE ACCOUNT (gradient gold)
               _GoldButton(
-                label: 'CREATE ACCOUNT',
-                onPressed: _agreed ? _createAccount : null,
+                label: _creatingAccount ? 'CREATING…' : 'CREATE ACCOUNT',
+                onPressed: (_agreed && !_creatingAccount)
+                    ? _createAccount
+                    : null,
               ),
               const SizedBox(height: 20),
               Center(
@@ -234,6 +360,7 @@ class _Field extends StatelessWidget {
     this.obscure = false,
     this.suffix,
     this.keyboardType,
+    this.maxLength,
   });
 
   final TextEditingController controller;
@@ -242,6 +369,7 @@ class _Field extends StatelessWidget {
   final bool obscure;
   final Widget? suffix;
   final TextInputType? keyboardType;
+  final int? maxLength;
 
   @override
   Widget build(BuildContext context) {
@@ -257,9 +385,11 @@ class _Field extends StatelessWidget {
         controller: controller,
         obscureText: obscure,
         keyboardType: keyboardType,
+        maxLength: maxLength,
         decoration: InputDecoration(
           prefixIcon: Icon(icon, color: AppColors.textSecondary, size: 20),
           suffixIcon: suffix,
+          counterText: '',
           hintText: hint,
           hintStyle: const TextStyle(color: AppColors.hint),
           border: InputBorder.none,

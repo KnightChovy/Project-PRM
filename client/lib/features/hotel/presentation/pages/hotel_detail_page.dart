@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:smart_stay_ai/core/di/injection.dart';
 import 'package:smart_stay_ai/core/router/app_router.dart';
 import 'package:smart_stay_ai/core/theme/app_theme.dart';
 import 'package:smart_stay_ai/core/utils/amenity_icons.dart';
 import 'package:smart_stay_ai/core/widgets/app_network_image.dart';
 import 'package:smart_stay_ai/features/hotel/domain/entities/hotel.dart';
+import 'package:smart_stay_ai/features/hotel/presentation/providers/hotel_detail_notifier.dart';
+import 'package:smart_stay_ai/features/wishlist/presentation/providers/wishlist_notifier.dart';
 
 /// Trang chi tiết một khách sạn. Nhận vào 1 [Hotel] để hiển thị.
 class HotelDetailPage extends StatefulWidget {
@@ -18,10 +21,37 @@ class HotelDetailPage extends StatefulWidget {
 
 class _HotelDetailPageState extends State<HotelDetailPage> {
   static const _tabs = ['Overview', 'Rooms', 'Reviews', 'Location'];
+  // Factory — mỗi trang chi tiết là một phiên riêng nên ta tự dispose.
+  final HotelDetailNotifier _detailN = sl<HotelDetailNotifier>();
+  // Singleton — trái tim đồng bộ với tab Wishlist, KHÔNG dispose ở đây.
+  final WishlistNotifier _wishlistN = sl<WishlistNotifier>();
   int _tab = 0;
-  bool _saved = true;
 
-  Hotel get hotel => widget.hotel;
+  // Ưu tiên bản chi tiết đầy đủ từ API; trong lúc tải dùng bản tối giản
+  // truyền vào từ danh sách (fallback).
+  Hotel get hotel => _detailN.hotel ?? widget.hotel;
+
+  @override
+  void initState() {
+    super.initState();
+    _detailN.addListener(_onDetail);
+    _wishlistN.addListener(_onDetail);
+    _detailN.load(widget.hotel.id, fallback: widget.hotel);
+    // Cần danh sách đã lưu để biết trái tim đang bật hay tắt.
+    if (_wishlistN.status == WishlistStatus.initial) _wishlistN.load();
+  }
+
+  void _onDetail() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _detailN.removeListener(_onDetail);
+    _wishlistN.removeListener(_onDetail);
+    _detailN.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -31,9 +61,10 @@ class _HotelDetailPageState extends State<HotelDetailPage> {
         children: [
           _Header(
             images: hotel.gallery,
-            saved: _saved,
+            saved: _wishlistN.isSaved(hotel.id),
             onBack: () => context.pop(),
-            onToggleSaved: () => setState(() => _saved = !_saved),
+            // Lưu bản hotel đang xem (ưu tiên chi tiết đầy đủ) vào wishlist local.
+            onToggleSaved: () => _wishlistN.toggle(hotel),
           ),
           const _PriceAlertBanner(droppedAmount: 15),
           Padding(

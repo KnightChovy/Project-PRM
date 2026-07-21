@@ -4,17 +4,17 @@ import 'package:provider/provider.dart';
 import 'package:smart_stay_ai/core/di/injection.dart';
 import 'package:smart_stay_ai/core/router/app_router.dart';
 import 'package:smart_stay_ai/core/theme/app_theme.dart';
+import 'package:smart_stay_ai/core/utils/currency_format.dart';
 import 'package:smart_stay_ai/core/utils/date_format.dart';
-import 'package:smart_stay_ai/core/widgets/app_network_image.dart';
 import 'package:smart_stay_ai/features/booking/domain/entities/booking.dart';
-import 'package:smart_stay_ai/features/booking/domain/entities/booking_history_item.dart';
-import 'package:smart_stay_ai/features/booking/presentation/providers/booking_history_notifier.dart';
+import 'package:smart_stay_ai/features/booking/domain/entities/booking_status.dart';
+import 'package:smart_stay_ai/features/booking/presentation/providers/booking_notifier.dart'
+    show RequestStatus;
+import 'package:smart_stay_ai/features/booking/presentation/providers/my_bookings_notifier.dart';
 import 'package:smart_stay_ai/features/review/presentation/pages/write_review_page.dart';
 
-/// Màn "My Bookings" nâng cấp: 3 tab Upcoming / Completed / Cancelled,
-/// mỗi booking có nút hành động phù hợp (View Details, Cancel, Write Review...).
-///
-/// Đây là TRANG MỚI — không sửa `my_booking_page.dart` cũ của Phat.
+/// Màn "My Bookings": 3 tab Upcoming / Completed / Cancelled, mỗi booking có
+/// nút hành động phù hợp với trạng thái.
 class MyBookingsViewPage extends StatefulWidget {
   const MyBookingsViewPage({super.key});
 
@@ -23,7 +23,7 @@ class MyBookingsViewPage extends StatefulWidget {
 }
 
 class _MyBookingsViewPageState extends State<MyBookingsViewPage> {
-  final _notifier = sl<BookingHistoryNotifier>();
+  final _notifier = sl<MyBookingsNotifier>();
 
   @override
   void initState() {
@@ -64,22 +64,26 @@ class _MyBookingsViewPageState extends State<MyBookingsViewPage> {
                 ],
               ),
               Expanded(
-                child: Consumer<BookingHistoryNotifier>(
+                child: Consumer<MyBookingsNotifier>(
                   builder: (context, notifier, _) {
                     if (notifier.isLoading) {
                       return const Center(child: CircularProgressIndicator());
                     }
+                    if (notifier.status == RequestStatus.error) {
+                      return _ErrorState(
+                        message: notifier.errorMessage ??
+                            'Không tải được danh sách đặt phòng',
+                        onRetry: notifier.load,
+                      );
+                    }
                     return TabBarView(
                       children: [
                         _BookingList(
-                            items: notifier.upcoming,
-                            onRefresh: notifier.load),
+                            items: notifier.upcoming, onRefresh: notifier.load),
                         _BookingList(
-                            items: notifier.completed,
-                            onRefresh: notifier.load),
+                            items: notifier.completed, onRefresh: notifier.load),
                         _BookingList(
-                            items: notifier.cancelled,
-                            onRefresh: notifier.load),
+                            items: notifier.cancelled, onRefresh: notifier.load),
                       ],
                     );
                   },
@@ -93,14 +97,43 @@ class _MyBookingsViewPageState extends State<MyBookingsViewPage> {
   }
 }
 
+class _ErrorState extends StatelessWidget {
+  const _ErrorState({required this.message, required this.onRetry});
+  final String message;
+  final Future<void> Function() onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.cloud_off, color: AppColors.textSecondary),
+            const SizedBox(height: 12),
+            // Message từ server đã là tiếng Việt, hiển thị thẳng.
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: AppColors.textSecondary),
+            ),
+            const SizedBox(height: 16),
+            OutlinedButton(onPressed: onRetry, child: const Text('Thử lại')),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _BookingList extends StatelessWidget {
   const _BookingList({required this.items, required this.onRefresh});
-  final List<BookingHistoryItem> items;
+  final List<Booking> items;
   final Future<void> Function() onRefresh;
 
   @override
   Widget build(BuildContext context) {
-    // Kéo xuống để tải lại — bắt được booking mới đặt qua luồng của Phat.
     return RefreshIndicator(
       onRefresh: onRefresh,
       color: AppColors.gold,
@@ -120,22 +153,21 @@ class _BookingList extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
               itemCount: items.length,
               separatorBuilder: (_, _) => const SizedBox(height: 16),
-              itemBuilder: (_, i) => _BookingCard(item: items[i]),
+              itemBuilder: (_, i) => _BookingCard(booking: items[i]),
             ),
     );
   }
 }
 
 class _BookingCard extends StatelessWidget {
-  const _BookingCard({required this.item});
-  final BookingHistoryItem item;
+  const _BookingCard({required this.booking});
+  final Booking booking;
 
   void _openDetail(BuildContext context) =>
-      context.push(AppRoutes.bookingDetailView, extra: item.booking);
+      context.push(AppRoutes.bookingDetailView, extra: booking);
 
   @override
   Widget build(BuildContext context) {
-    final b = item.booking;
     return Container(
       decoration: BoxDecoration(
         color: AppColors.surface,
@@ -150,11 +182,20 @@ class _BookingCard extends StatelessWidget {
         children: [
           Stack(
             children: [
-              SizedBox(
-                  height: 130,
-                  width: double.infinity,
-                  child: AppNetworkImage(url: b.imageUrl)),
-              Positioned(top: 10, left: 10, child: _StatusChip(item.status)),
+              // API booking không trả ảnh khách sạn — dùng nền thương hiệu cho
+              // tới khi tích hợp API hotel.
+              Container(
+                height: 130,
+                width: double.infinity,
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [AppColors.goldLight, AppColors.goldDark],
+                  ),
+                ),
+                child: const Icon(Icons.apartment, color: Colors.white, size: 40),
+              ),
+              Positioned(
+                  top: 10, left: 10, child: _StatusChip(booking.status)),
             ],
           ),
           Padding(
@@ -165,14 +206,14 @@ class _BookingCard extends StatelessWidget {
                 Row(
                   children: [
                     Expanded(
-                      child: Text(b.hotelName,
+                      child: Text(booking.hotelName,
                           style: const TextStyle(
                               fontFamily: 'Georgia',
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
                               color: AppColors.textPrimary)),
                     ),
-                    Text('\$${b.total.toStringAsFixed(0)}',
+                    Text(formatVnd(booking.totalAmount),
                         style: const TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.bold,
@@ -180,9 +221,10 @@ class _BookingCard extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 4),
-                Text(formatDateRange(b.checkIn, b.checkOut),
+                Text(
+                    formatDateRange(booking.checkInDate, booking.checkOutDate),
                     style: const TextStyle(color: AppColors.textSecondary)),
-                Text(b.roomName,
+                Text(booking.roomName,
                     style: const TextStyle(
                         color: AppColors.textSecondary, fontSize: 13)),
                 const SizedBox(height: 12),
@@ -195,29 +237,32 @@ class _BookingCard extends StatelessWidget {
     );
   }
 
-  /// Nút hành động tuỳ theo trạng thái (giống thiết kế Stitch).
+  /// Nút hành động tuỳ theo trạng thái.
   Widget _actions(BuildContext context) {
-    final b = item.booking;
-    switch (item.status) {
-      case BookingLifecycle.upcoming:
+    final details = Expanded(
+      child: _OutlinedBtn('View Details', () => _openDetail(context)),
+    );
+
+    switch (booking.status) {
+      // Còn chờ trả tiền hoặc sắp tới: cho xem chi tiết và huỷ.
+      case BookingStatus.pending:
+      case BookingStatus.confirmed:
+      case BookingStatus.checkedIn:
         return Row(children: [
-          Expanded(
-              child: _OutlinedBtn(
-                  'View Details', () => _openDetail(context))),
+          details,
           const SizedBox(width: 10),
           Expanded(
             child: _OutlinedBtn(
               'Cancel',
-              () => context.push(AppRoutes.cancelBooking, extra: b),
+              () => context.push(AppRoutes.cancelBooking, extra: booking),
               danger: true,
             ),
           ),
         ]);
-      case BookingLifecycle.completed:
+
+      case BookingStatus.checkedOut:
         return Row(children: [
-          Expanded(
-              child: _OutlinedBtn(
-                  'View Details', () => _openDetail(context))),
+          details,
           const SizedBox(width: 10),
           Expanded(
             child: _FilledBtn(
@@ -225,62 +270,62 @@ class _BookingCard extends StatelessWidget {
               () => context.push(
                 AppRoutes.writeReview,
                 extra: WriteReviewArgs(
-                  hotelName: b.hotelName,
-                  location: b.location,
-                  imageUrl: b.imageUrl,
+                  bookingId: booking.id,
+                  hotelName: booking.hotelName,
+                  location: booking.location,
+                  imageUrl: '',
                 ),
               ),
             ),
           ),
         ]);
-      case BookingLifecycle.cancelled:
-        return Row(children: [
-          Expanded(
-              child: _OutlinedBtn(
-                  'View Details', () => _openDetail(context))),
-          const SizedBox(width: 10),
-          Expanded(
-            child: _FilledBtn('Rebook', () => _rebook(context, b)),
-          ),
-        ]);
-    }
-  }
 
-  /// Đặt lại booking đã huỷ → tạo booking mới ở tab Upcoming.
-  Future<void> _rebook(BuildContext context, Booking b) async {
-    final messenger = ScaffoldMessenger.of(context);
-    final ok = await sl<BookingHistoryNotifier>().rebook(b);
-    messenger.showSnackBar(SnackBar(
-      content: Text(ok
-          ? 'Đã đặt lại! Booking mới nằm ở tab Upcoming.'
-          : 'Đặt lại thất bại, vui lòng thử lại.'),
-    ));
+      case BookingStatus.cancelled:
+      case BookingStatus.noShow:
+        return Row(children: [details]);
+    }
   }
 }
 
 class _StatusChip extends StatelessWidget {
   const _StatusChip(this.status);
-  final BookingLifecycle status;
+  final BookingStatus status;
 
   @override
   Widget build(BuildContext context) {
-    late final String label;
-    late final Color bg;
-    late final Color fg;
-    switch (status) {
-      case BookingLifecycle.upcoming:
-        label = 'Confirmed';
-        bg = const Color(0xFFEAF3EE);
-        fg = const Color(0xFF3B7A57);
-      case BookingLifecycle.completed:
-        label = 'Completed';
-        bg = const Color(0xFFEFEFEF);
-        fg = AppColors.textSecondary;
-      case BookingLifecycle.cancelled:
-        label = 'Cancelled';
-        bg = const Color(0xFFF6E5E5);
-        fg = const Color(0xFFB23B3B);
-    }
+    final (label, bg, fg) = switch (status) {
+      BookingStatus.pending => (
+          'Chờ thanh toán',
+          const Color(0xFFFDF3E2),
+          const Color(0xFF9A6B1F),
+        ),
+      BookingStatus.confirmed => (
+          'Confirmed',
+          const Color(0xFFEAF3EE),
+          const Color(0xFF3B7A57),
+        ),
+      BookingStatus.checkedIn => (
+          'Đang ở',
+          const Color(0xFFEAF0F6),
+          const Color(0xFF3B5F7A),
+        ),
+      BookingStatus.checkedOut => (
+          'Completed',
+          const Color(0xFFEFEFEF),
+          AppColors.textSecondary,
+        ),
+      BookingStatus.cancelled => (
+          'Cancelled',
+          const Color(0xFFF6E5E5),
+          const Color(0xFFB23B3B),
+        ),
+      BookingStatus.noShow => (
+          'Không đến',
+          const Color(0xFFF6E5E5),
+          const Color(0xFFB23B3B),
+        ),
+    };
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
@@ -288,8 +333,8 @@ class _StatusChip extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
       ),
       child: Text(label,
-          style: TextStyle(
-              fontSize: 12, fontWeight: FontWeight.w600, color: fg)),
+          style:
+              TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: fg)),
     );
   }
 }
@@ -307,8 +352,7 @@ class _OutlinedBtn extends StatelessWidget {
       style: OutlinedButton.styleFrom(
         foregroundColor: color,
         side: BorderSide(color: color),
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
       onPressed: onTap,
       child: Text(label),
@@ -328,8 +372,7 @@ class _FilledBtn extends StatelessWidget {
         backgroundColor: AppColors.gold,
         foregroundColor: Colors.white,
         elevation: 0,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
       onPressed: onTap,
       child: Text(label),

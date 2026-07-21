@@ -3,6 +3,9 @@ import 'package:equatable/equatable.dart';
 /// Một đánh giá (review) của khách cho một resort/khách sạn. Thuần Dart.
 class Review extends Equatable {
   final String id;
+
+  /// Id của booking được đánh giá — mỗi booking chỉ 1 review (theo API).
+  final String bookingId;
   final String hotelName;
   final String location;
 
@@ -21,6 +24,7 @@ class Review extends Equatable {
 
   const Review({
     required this.id,
+    required this.bookingId,
     required this.hotelName,
     required this.location,
     required this.overall,
@@ -36,6 +40,7 @@ class Review extends Equatable {
   @override
   List<Object?> get props => [
         id,
+        bookingId,
         hotelName,
         location,
         overall,

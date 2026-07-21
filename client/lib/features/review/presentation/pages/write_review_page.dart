@@ -1,18 +1,32 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:smart_stay_ai/core/di/injection.dart';
 import 'package:smart_stay_ai/core/theme/app_theme.dart';
 import 'package:smart_stay_ai/core/widgets/app_network_image.dart';
 import 'package:smart_stay_ai/features/review/domain/entities/review.dart';
 import 'package:smart_stay_ai/features/review/domain/usecases/submit_review.dart';
+import 'package:smart_stay_ai/features/review/domain/usecases/upload_review_image.dart';
 import 'package:smart_stay_ai/features/review/presentation/providers/review_notifier.dart';
+
+/// Một ảnh khách vừa chọn — giữ bytes (hiện thumbnail + upload đa nền tảng).
+class _PickedPhoto {
+  final Uint8List bytes;
+  final String name;
+  const _PickedPhoto(this.bytes, this.name);
+}
 
 /// Tham số truyền vào màn Write Review (qua `extra` của go_router).
 class WriteReviewArgs {
+  /// Id booking đã trả phòng cần đánh giá (bắt buộc cho API POST /reviews).
+  final String bookingId;
   final String hotelName;
   final String location;
   final String imageUrl;
   const WriteReviewArgs({
+    required this.bookingId,
     required this.hotelName,
     required this.location,
     this.imageUrl = '',
@@ -38,25 +52,43 @@ class _WriteReviewPageState extends State<WriteReviewPage> {
   bool _anonymous = false;
   final _commentCtrl = TextEditingController();
 
+  // Ảnh đính kèm (tối đa 5). Server cho tối đa 10, nhưng UI gọn 5 là đủ.
+  static const _maxPhotos = 5;
+  final ImagePicker _picker = ImagePicker();
+  final List<_PickedPhoto> _photos = [];
+
   @override
   void dispose() {
     _commentCtrl.dispose();
     super.dispose();
   }
 
+  Future<void> _pickPhoto() async {
+    final x = await _picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 70,
+      maxWidth: 1600,
+    );
+    if (x == null) return;
+    final bytes = await x.readAsBytes();
+    if (!mounted) return;
+    setState(() => _photos.add(_PickedPhoto(bytes, x.name)));
+  }
+
   Future<void> _onSubmit(ReviewNotifier notifier) async {
     final ok = await notifier.submit(
       SubmitReviewParams(
-        hotelName: widget.args.hotelName,
-        location: widget.args.location,
+        bookingId: widget.args.bookingId,
         overall: _overall,
         cleanliness: _cleanliness,
         locationRating: _locationRating,
         service: _service,
         value: _value,
         comment: _commentCtrl.text.trim(),
-        isAnonymous: _anonymous,
       ),
+      photos: _photos
+          .map((p) => UploadReviewImageParams(bytes: p.bytes, filename: p.name))
+          .toList(),
     );
     if (!mounted) return;
     // Side effect (snackbar/điều hướng) đặt ở widget, sau khi await xong.
@@ -76,7 +108,7 @@ class _WriteReviewPageState extends State<WriteReviewPage> {
   Widget build(BuildContext context) {
     return ChangeNotifierProvider(
       create: (_) =>
-          sl<ReviewNotifier>()..checkExisting(widget.args.hotelName),
+          sl<ReviewNotifier>()..checkExisting(widget.args.bookingId),
       child: Scaffold(
         appBar: AppBar(
           centerTitle: true,
@@ -259,7 +291,7 @@ class _WriteReviewPageState extends State<WriteReviewPage> {
     );
   }
 
-  /// Khu "Add Photos" — 3 ô thêm ảnh (demo, chưa gắn image_picker).
+  /// Khu "Add Photos" — chọn ảnh thật từ thư viện, upload khi bấm Submit.
   Widget _addPhotos() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -268,12 +300,40 @@ class _WriteReviewPageState extends State<WriteReviewPage> {
             style: TextStyle(
                 fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
         const SizedBox(height: 10),
-        Row(
-          children: List.generate(
-            3,
-            (_) => Padding(
-              padding: const EdgeInsets.only(right: 14),
-              child: _photoSlot(),
+        Wrap(
+          spacing: 14,
+          runSpacing: 14,
+          children: [
+            for (var i = 0; i < _photos.length; i++) _photoThumb(i),
+            if (_photos.length < _maxPhotos) _addSlot(),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _photoThumb(int index) {
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Image.memory(
+            _photos[index].bytes,
+            width: 64,
+            height: 64,
+            fit: BoxFit.cover,
+          ),
+        ),
+        Positioned(
+          top: -6,
+          right: -6,
+          child: GestureDetector(
+            onTap: () => setState(() => _photos.removeAt(index)),
+            child: const CircleAvatar(
+              radius: 11,
+              backgroundColor: AppColors.goldDark,
+              child: Icon(Icons.close, size: 14, color: Colors.white),
             ),
           ),
         ),
@@ -281,19 +341,17 @@ class _WriteReviewPageState extends State<WriteReviewPage> {
     );
   }
 
-  Widget _photoSlot() {
+  Widget _addSlot() {
     return GestureDetector(
-      onTap: () => ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Chọn ảnh (demo)')),
-      ),
+      onTap: _pickPhoto,
       child: Container(
         width: 64,
         height: 64,
         decoration: BoxDecoration(
-          shape: BoxShape.circle,
+          borderRadius: BorderRadius.circular(12),
           border: Border.all(color: AppColors.goldLight, width: 1.5),
         ),
-        child: const Icon(Icons.add, color: AppColors.gold),
+        child: const Icon(Icons.add_a_photo_outlined, color: AppColors.gold),
       ),
     );
   }

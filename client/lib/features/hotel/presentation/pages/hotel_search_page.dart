@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:smart_stay_ai/core/di/injection.dart';
 import 'package:smart_stay_ai/core/router/app_router.dart';
 import 'package:smart_stay_ai/core/theme/app_theme.dart';
 import 'package:smart_stay_ai/features/hotel/domain/entities/hotel.dart';
-import 'package:smart_stay_ai/features/hotel/presentation/demo_hotels.dart';
 import 'package:smart_stay_ai/features/hotel/presentation/models/hotel_filter.dart';
+import 'package:smart_stay_ai/features/hotel/presentation/providers/hotel_notifier.dart';
 import 'package:smart_stay_ai/features/hotel/presentation/widgets/hotel_card.dart';
+import 'package:smart_stay_ai/features/wishlist/presentation/providers/wishlist_notifier.dart';
 
 /// Màn kết quả tìm kiếm khách sạn: ô search, nút Filter & Sort, nút Map View
 /// và danh sách thẻ khách sạn đã lọc/sắp xếp.
@@ -19,12 +21,31 @@ class HotelSearchPage extends StatefulWidget {
 }
 
 class _HotelSearchPageState extends State<HotelSearchPage> {
+  // Singleton dùng chung với Home/Map — nếu Home đã tải thì không gọi API lại.
+  final HotelNotifier _hotelN = sl<HotelNotifier>();
+  // Singleton wishlist — để trái tim trên thẻ đồng bộ với tab Wishlist.
+  final WishlistNotifier _wishlistN = sl<WishlistNotifier>();
   late final TextEditingController _queryCtrl =
       TextEditingController(text: widget.initialQuery);
   HotelFilter _filter = const HotelFilter();
 
   @override
+  void initState() {
+    super.initState();
+    _hotelN.addListener(_onHotels);
+    _wishlistN.addListener(_onHotels);
+    if (_hotelN.status == HotelStatus.initial) _hotelN.load();
+    if (_wishlistN.status == WishlistStatus.initial) _wishlistN.load();
+  }
+
+  void _onHotels() {
+    if (mounted) setState(() {});
+  }
+
+  @override
   void dispose() {
+    _hotelN.removeListener(_onHotels);
+    _wishlistN.removeListener(_onHotels);
     _queryCtrl.dispose();
     super.dispose();
   }
@@ -32,9 +53,10 @@ class _HotelSearchPageState extends State<HotelSearchPage> {
   /// Lọc theo từ khoá (tên/địa điểm) rồi áp [HotelFilter].
   List<Hotel> get _results {
     final q = _queryCtrl.text.trim().toLowerCase();
+    final source = _hotelN.hotels;
     final byQuery = q.isEmpty
-        ? kDemoHotels
-        : kDemoHotels
+        ? source
+        : source
             .where((h) =>
                 h.name.toLowerCase().contains(q) ||
                 h.location.toLowerCase().contains(q))
@@ -65,21 +87,40 @@ class _HotelSearchPageState extends State<HotelSearchPage> {
           children: [
             _searchRow(),
             _toolbar(results.length),
-            Expanded(
-              child: results.isEmpty
-                  ? _empty()
-                  : ListView.separated(
-                      padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
-                      itemCount: results.length,
-                      separatorBuilder: (_, _) => const SizedBox(height: 18),
-                      itemBuilder: (_, i) => HotelCard(
-                        hotel: results[i],
-                        onTap: () => _openHotel(results[i]),
-                      ),
-                    ),
-            ),
+            Expanded(child: _body(results)),
           ],
         ),
+      ),
+    );
+  }
+
+  /// Thân danh sách: ưu tiên loading (khi chưa có dữ liệu) → lỗi → kết quả.
+  Widget _body(List<Hotel> results) {
+    if (_hotelN.isLoading && _hotelN.hotels.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_hotelN.status == HotelStatus.error && _hotelN.hotels.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(
+            _hotelN.errorMessage ?? 'Không tải được danh sách khách sạn',
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: AppColors.textSecondary),
+          ),
+        ),
+      );
+    }
+    if (results.isEmpty) return _empty();
+    return ListView.separated(
+      padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+      itemCount: results.length,
+      separatorBuilder: (_, _) => const SizedBox(height: 18),
+      itemBuilder: (_, i) => HotelCard(
+        hotel: results[i],
+        onTap: () => _openHotel(results[i]),
+        saved: _wishlistN.isSaved(results[i].id),
+        onToggleSaved: () => _wishlistN.toggle(results[i]),
       ),
     );
   }

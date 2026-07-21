@@ -18,6 +18,12 @@ export class HotelController {
     res.send(hotel);
   });
 
+  // Điểm đến phổ biến cho màn Home (gom khách sạn theo thành phố) — public
+  getDestinations = catchAsync(async (_req: Request, res: Response): Promise<void> => {
+    const destinations = await hotelService.getPopularDestinations();
+    res.send(destinations);
+  });
+
   getRoomTypes = catchAsync(async (req: Request, res: Response): Promise<void> => {
     const filter = pick(req.query, ['checkIn', 'checkOut', 'guests', 'minPrice', 'maxPrice', 'bedType', 'viewType']);
     const roomTypes = await hotelService.getRoomTypes(req.params.hotelId as string, filter);

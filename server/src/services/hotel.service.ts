@@ -511,6 +511,36 @@ export class HotelService {
       totalPrice: quote?.totalPrice ?? null,
     };
   };
+
+  /**
+   * Điểm đến phổ biến cho màn Home: gom khách sạn đang mở bán theo thành phố,
+   * đếm số lượng và lấy một ảnh đại diện (ưu tiên ảnh primary của KS nhiều sao nhất).
+   * Sắp theo số khách sạn giảm dần.
+   */
+  getPopularDestinations = async (limit = 8) => {
+    const grouped = await prisma.hotel.groupBy({
+      by: ['city'],
+      where: { isActive: true, isListed: true, deletedAt: null },
+      _count: { _all: true },
+      orderBy: { _count: { city: 'desc' } },
+      take: limit,
+    });
+
+    return Promise.all(
+      grouped.map(async (g) => {
+        const hotel = await prisma.hotel.findFirst({
+          where: { city: g.city, isActive: true, isListed: true, deletedAt: null },
+          orderBy: { starRating: 'desc' },
+          include: { images: { orderBy: [{ isPrimary: 'desc' }, { sortOrder: 'asc' }], take: 1 } },
+        });
+        return {
+          city: g.city,
+          hotelCount: g._count._all,
+          imageUrl: hotel?.images[0]?.url ?? null,
+        };
+      })
+    );
+  };
 }
 
 export const hotelService = new HotelService();

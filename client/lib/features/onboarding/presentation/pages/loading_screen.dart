@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:smart_stay_ai/core/di/injection.dart';
 import 'package:smart_stay_ai/core/router/app_router.dart';
+import 'package:smart_stay_ai/core/session/app_session.dart';
 import 'package:smart_stay_ai/core/theme/app_theme.dart';
 
 /// Màn hình khởi động (splash) hiển thị khi mở app.
@@ -25,14 +27,22 @@ class _LoadingScreenState extends State<LoadingScreen>
       duration: const Duration(milliseconds: 1400),
     )..forward();
     _fade = CurvedAnimation(parent: _controller, curve: Curves.easeIn);
-    _scale = Tween<double>(begin: 0.85, end: 1.0).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeOutBack),
-    );
+    _scale = Tween<double>(
+      begin: 0.85,
+      end: 1.0,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutBack));
 
-    // Sau ~2.6s tự chuyển sang màn giới thiệu.
+    // Sau ~2.6s rời splash. Ai đã đăng nhập lần trước thì vào thẳng màn chính.
+    //
+    // Token vẫn nằm trong SharedPreferences nhưng trước đây không ai đọc lúc
+    // khởi động, nên người dùng bị bắt đăng nhập lại mỗi lần mở app dù phiên
+    // còn hạn. Access token hết hạn cũng không sao: ApiInterceptor sẽ tự làm
+    // mới bằng refresh token ở request đầu tiên.
     Future.delayed(const Duration(milliseconds: 2600), () {
       if (!mounted) return;
-      context.go(AppRoutes.onboarding);
+      context.go(
+        sl<AppSession>().isSignedIn ? AppRoutes.home : AppRoutes.onboarding,
+      );
     });
   }
 

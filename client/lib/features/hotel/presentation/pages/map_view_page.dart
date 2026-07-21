@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:smart_stay_ai/core/di/injection.dart';
 import 'package:smart_stay_ai/core/router/app_router.dart';
 import 'package:smart_stay_ai/core/theme/app_theme.dart';
 import 'package:smart_stay_ai/core/widgets/app_network_image.dart';
 import 'package:smart_stay_ai/features/hotel/domain/entities/hotel.dart';
-import 'package:smart_stay_ai/features/hotel/presentation/demo_hotels.dart';
+import 'package:smart_stay_ai/features/hotel/presentation/providers/hotel_notifier.dart';
 
 /// Màn "Map View": nền bản đồ tối cách điệu, các ghim giá khách sạn và
 /// dải thẻ khách sạn lướt ngang ở đáy.
@@ -20,6 +21,8 @@ class MapViewPage extends StatefulWidget {
 }
 
 class _MapViewPageState extends State<MapViewPage> {
+  // Singleton dùng chung với Home/Search — dùng lại danh sách đã tải.
+  final HotelNotifier _hotelN = sl<HotelNotifier>();
   late final PageController _pageCtrl =
       PageController(viewportFraction: 0.82);
   int _selected = 0;
@@ -34,10 +37,22 @@ class _MapViewPageState extends State<MapViewPage> {
     Alignment(0.1, -0.6),
   ];
 
-  List<Hotel> get _hotels => kDemoHotels;
+  List<Hotel> get _hotels => _hotelN.hotels;
+
+  @override
+  void initState() {
+    super.initState();
+    _hotelN.addListener(_onHotels);
+    if (_hotelN.status == HotelStatus.initial) _hotelN.load();
+  }
+
+  void _onHotels() {
+    if (mounted) setState(() {});
+  }
 
   @override
   void dispose() {
+    _hotelN.removeListener(_onHotels);
     _pageCtrl.dispose();
     super.dispose();
   }
@@ -62,6 +77,8 @@ class _MapViewPageState extends State<MapViewPage> {
       body: Stack(
         children: [
           const Positioned.fill(child: _MapBackground()),
+          // Đang tải / lỗi khi chưa có dữ liệu — che giữa bản đồ.
+          if (hotels.isEmpty) Positioned.fill(child: Center(child: _mapStatus())),
           // Ghim giá cho từng khách sạn.
           for (var i = 0; i < hotels.length && i < _pinSpots.length; i++)
             Align(
@@ -86,38 +103,55 @@ class _MapViewPageState extends State<MapViewPage> {
             ),
           ),
           // Nút về vị trí hiện tại, nằm ngay trên dải thẻ.
-          Positioned(
-            right: 16,
-            bottom: 188,
-            child: _RoundDarkButton(
-              icon: Icons.my_location,
-              onTap: () => _selectPin(0),
+          if (hotels.isNotEmpty)
+            Positioned(
+              right: 16,
+              bottom: 188,
+              child: _RoundDarkButton(
+                icon: Icons.my_location,
+                onTap: () => _selectPin(0),
+              ),
             ),
-          ),
           // Dải thẻ khách sạn lướt ngang ở đáy.
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: SafeArea(
-              top: false,
-              child: SizedBox(
-                height: 168,
-                child: PageView.builder(
-                  controller: _pageCtrl,
-                  itemCount: hotels.length,
-                  onPageChanged: (i) => setState(() => _selected = i),
-                  itemBuilder: (_, i) => _MapHotelCard(
-                    hotel: hotels[i],
-                    onTap: () => _openHotel(hotels[i]),
+          if (hotels.isNotEmpty)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: SafeArea(
+                top: false,
+                child: SizedBox(
+                  height: 168,
+                  child: PageView.builder(
+                    controller: _pageCtrl,
+                    itemCount: hotels.length,
+                    onPageChanged: (i) => setState(() => _selected = i),
+                    itemBuilder: (_, i) => _MapHotelCard(
+                      hotel: hotels[i],
+                      onTap: () => _openHotel(hotels[i]),
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
         ],
       ),
     );
+  }
+
+  /// Vòng quay khi đang tải hoặc thông báo lỗi (chữ sáng cho nền bản đồ tối).
+  Widget _mapStatus() {
+    if (_hotelN.status == HotelStatus.error) {
+      return Padding(
+        padding: const EdgeInsets.all(24),
+        child: Text(
+          _hotelN.errorMessage ?? 'Không tải được khách sạn',
+          textAlign: TextAlign.center,
+          style: const TextStyle(color: Colors.white70),
+        ),
+      );
+    }
+    return const CircularProgressIndicator(color: Colors.white);
   }
 
   Widget _topBar() {

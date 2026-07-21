@@ -1,20 +1,52 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
+import 'package:smart_stay_ai/core/di/injection.dart';
 import 'package:smart_stay_ai/core/router/app_router.dart';
+import 'package:smart_stay_ai/core/session/app_session.dart';
 import 'package:smart_stay_ai/core/theme/app_theme.dart';
 import 'package:smart_stay_ai/core/widgets/app_network_image.dart';
+import 'package:smart_stay_ai/features/profile/presentation/providers/profile_notifier.dart';
 import 'package:smart_stay_ai/features/hotel/domain/entities/hotel.dart';
-import 'package:smart_stay_ai/features/hotel/presentation/demo_hotels.dart';
+import 'package:smart_stay_ai/features/hotel/domain/entities/destination.dart';
+import 'package:smart_stay_ai/features/hotel/presentation/providers/hotel_notifier.dart';
 import 'package:smart_stay_ai/features/hotel/presentation/widgets/hotel_card.dart';
+import 'package:smart_stay_ai/features/wishlist/presentation/providers/wishlist_notifier.dart';
 
 /// Trang chủ (tab Home): lời chào, ô tìm kiếm, gợi ý AI, điểm đến phổ biến
 /// và danh sách khách sạn nổi bật.
 ///
 /// NOTE: dùng [kDemoHotels]. Khi có backend, lấy qua UseCase + Notifier.
-class HomePage extends StatelessWidget {
-  const HomePage({super.key, this.userName = 'Alex'});
+class HomePage extends StatefulWidget {
+  const HomePage({super.key});
 
-  final String userName;
+  @override
+  State<HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends State<HomePage> {
+  final _hotelN = sl<HotelNotifier>();
+  // Singleton wishlist — trái tim trên thẻ đồng bộ với tab Wishlist.
+  final _wishlistN = sl<WishlistNotifier>();
+
+  @override
+  void initState() {
+    super.initState();
+    // Tải danh sách khách sạn 1 lần (singleton dùng chung Home/Search/Map).
+    if (_hotelN.status == HotelStatus.initial) _hotelN.load();
+    _wishlistN.addListener(_onWishlist);
+    if (_wishlistN.status == WishlistStatus.initial) _wishlistN.load();
+  }
+
+  void _onWishlist() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _wishlistN.removeListener(_onWishlist);
+    super.dispose();
+  }
 
   void _openHotel(BuildContext context, Hotel hotel) {
     context.push(AppRoutes.hotelDetail, extra: hotel);
@@ -26,15 +58,21 @@ class HomePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final aiPicks = kDemoHotels.take(3).toList();
-    final featured = kDemoHotels.skip(1).toList();
+    return ChangeNotifierProvider.value(
+      value: _hotelN,
+      child: Consumer<HotelNotifier>(
+        builder: (context, hotelN, _) {
+          final hotels = hotelN.hotels;
+          final aiPicks = hotels.take(3).toList();
+          final featured =
+              hotels.length > 1 ? hotels.skip(1).toList() : hotels;
 
-    return SafeArea(
-      bottom: false,
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-        children: [
-          _Header(userName: userName),
+          return SafeArea(
+            bottom: false,
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+              children: [
+          const _Header(),
           const SizedBox(height: 20),
           _SearchBar(onTap: () => _openSearch(context)),
           const SizedBox(height: 28),
@@ -61,19 +99,22 @@ class HomePage extends StatelessWidget {
               },
             ),
           ),
-          const SizedBox(height: 28),
-          _SectionTitle(title: 'Popular Destinations'),
-          const SizedBox(height: 14),
-          SizedBox(
-            height: 100,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: kPopularDestinations.length,
-              separatorBuilder: (_, _) => const SizedBox(width: 18),
-              itemBuilder: (_, i) =>
-                  _DestinationItem(destination: kPopularDestinations[i]),
+          // Điểm đến phổ biến (từ API) — ẩn khi chưa có dữ liệu.
+          if (hotelN.destinations.isNotEmpty) ...[
+            const SizedBox(height: 28),
+            _SectionTitle(title: 'Popular Destinations'),
+            const SizedBox(height: 14),
+            SizedBox(
+              height: 100,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: hotelN.destinations.length,
+                separatorBuilder: (_, _) => const SizedBox(width: 18),
+                itemBuilder: (_, i) =>
+                    _DestinationItem(destination: hotelN.destinations[i]),
+              ),
             ),
-          ),
+          ],
           const SizedBox(height: 28),
           _SectionTitle(
             title: 'Featured Hotels',
@@ -89,60 +130,108 @@ class HomePage extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 14),
-          ...featured.map(
-            (h) => Padding(
-              padding: const EdgeInsets.only(bottom: 18),
-              child: HotelCard(hotel: h, onTap: () => _openHotel(context, h)),
+          if (hotelN.isLoading && hotels.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 32),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (hotelN.status == HotelStatus.error)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 24),
+              child: Center(
+                child: Text(
+                  hotelN.errorMessage ?? 'Không tải được khách sạn',
+                  style: const TextStyle(color: AppColors.textSecondary),
+                ),
+              ),
+            )
+          else
+            ...featured.map(
+              (h) => Padding(
+                padding: const EdgeInsets.only(bottom: 18),
+                child: HotelCard(
+                  hotel: h,
+                  onTap: () => _openHotel(context, h),
+                  saved: _wishlistN.isSaved(h.id),
+                  onToggleSaved: () => _wishlistN.toggle(h),
+                ),
+              ),
             ),
-          ),
-        ],
+              ],
+            ),
+          );
+        },
       ),
     );
   }
 }
 
-/// Lời chào + chuông thông báo + avatar.
+/// Lời chào + chuông thông báo + avatar (hoặc nút đăng nhập cho khách).
 class _Header extends StatelessWidget {
-  const _Header({required this.userName});
-
-  final String userName;
+  const _Header();
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Good morning, $userName 👋',
-                style: const TextStyle(
-                  fontFamily: 'Georgia',
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.textPrimary,
-                ),
+    // Nghe CẢ HAI: AppSession báo lúc đăng nhập/đăng xuất, ProfileNotifier báo
+    // khi có tên và ảnh thật. Thiếu cái nào thì header cũng đứng im sai trạng
+    // thái cho tới lần vẽ lại tiếp theo.
+    return Consumer2<AppSession, ProfileNotifier>(
+      builder: (context, session, notifier, _) {
+        final signedIn = session.isSignedIn;
+        final profile = notifier.profile;
+
+        // Vừa đăng nhập ở màn khác quay về đây thì hồ sơ chưa được tải.
+        if (signedIn && notifier.status == ProfileStatus.initial) {
+          // Hoãn sang sau khung hình: gọi notifyListeners ngay trong build sẽ
+          // ném "setState() called during build".
+          WidgetsBinding.instance.addPostFrameCallback((_) => notifier.load());
+        }
+
+        return Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    signedIn
+                        ? 'Xin chào, ${_firstName(profile?.fullName)} 👋'
+                        : 'Chào bạn 👋',
+                    style: const TextStyle(
+                      fontFamily: 'Georgia',
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.textPrimary,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Find your perfect stay',
+                    style: TextStyle(color: AppColors.textSecondary),
+                  ),
+                ],
               ),
-              const SizedBox(height: 4),
-              const Text(
-                'Find your perfect stay',
-                style: TextStyle(color: AppColors.textSecondary),
-              ),
-            ],
-          ),
-        ),
-        _circleIcon(Icons.notifications_none, badge: true),
-        const SizedBox(width: 12),
-        const CircleAvatar(
-          radius: 22,
-          backgroundColor: AppColors.goldLight,
-          backgroundImage: NetworkImage(
-            'https://i.pravatar.cc/150?img=12',
-          ),
-        ),
-      ],
+            ),
+            if (signedIn) ...[
+              _circleIcon(Icons.notifications_none, badge: true),
+              const SizedBox(width: 12),
+              _HomeAvatar(url: profile?.avatarUrl),
+            ] else
+              // Khách vãng lai: không có avatar để hiện, đưa luôn lối đăng nhập.
+              const _SignInButton(),
+          ],
+        );
+      },
     );
+  }
+
+  /// Chỉ lấy tên gọi để lời chào không bị tràn trên màn hình hẹp.
+  String _firstName(String? fullName) {
+    final full = (fullName ?? '').trim();
+    if (full.isEmpty) return 'bạn';
+    return full.split(' ').last;
   }
 
   Widget _circleIcon(IconData icon, {bool badge = false}) {
@@ -171,6 +260,55 @@ class _Header extends StatelessWidget {
             ),
           ),
       ],
+    );
+  }
+}
+
+/// Ảnh đại diện thật của người đang đăng nhập.
+///
+/// KHÔNG dùng ảnh mẫu như trước (`pravatar.cc`) — người dùng tưởng đó là ảnh
+/// của mình, mà khách chưa đăng nhập cũng thấy nên trông như đã có tài khoản.
+class _HomeAvatar extends StatelessWidget {
+  const _HomeAvatar({required this.url});
+
+  final String? url;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasImage = url != null && url!.isNotEmpty;
+    return CircleAvatar(
+      radius: 22,
+      backgroundColor: AppColors.goldLight,
+      foregroundImage: hasImage ? NetworkImage(url!) : null,
+      child: hasImage
+          ? null
+          : const Icon(Icons.person, size: 24, color: AppColors.textPrimary),
+    );
+  }
+}
+
+/// Lối vào đăng nhập cho khách vãng lai, thay chỗ của avatar.
+class _SignInButton extends StatelessWidget {
+  const _SignInButton();
+
+  @override
+  Widget build(BuildContext context) {
+    return FilledButton(
+      style: FilledButton.styleFrom(
+        backgroundColor: AppColors.goldDark,
+        foregroundColor: Colors.white,
+        // Cao 44px cho dễ chạm bằng ngón tay trên điện thoại.
+        minimumSize: const Size(0, 44),
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(22),
+        ),
+      ),
+      onPressed: () => context.push(AppRoutes.login),
+      child: const Text(
+        'Đăng nhập',
+        style: TextStyle(fontWeight: FontWeight.w600),
+      ),
     );
   }
 }

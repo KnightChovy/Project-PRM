@@ -1,16 +1,11 @@
 import 'package:equatable/equatable.dart';
 
-/// Đối tượng nghiệp vụ "Người dùng" — thuần Dart, KHÔNG có fromJson/toJson.
 class User extends Equatable {
   final String id;
   final String name;
   final String email;
 
-  const User({
-    required this.id,
-    required this.name,
-    required this.email,
-  });
+  const User({required this.id, required this.name, required this.email});
 
   @override
   List<Object?> get props => [id, name, email];

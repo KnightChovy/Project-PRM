@@ -43,6 +43,8 @@ export interface UpdateMyProfileDto {
   preferredLanguage?: 'vi' | 'en';
   preferredCurrency?: 'VND' | 'USD';
   marketingOptIn?: boolean;
+  travelStyles?: string[];
+  notificationPrefs?: Record<string, boolean> | null;
 }
 
 /** Payload user tự đổi mật khẩu khi đang đăng nhập (cần mật khẩu hiện tại). */

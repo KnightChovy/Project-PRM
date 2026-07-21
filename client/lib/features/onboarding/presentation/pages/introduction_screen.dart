@@ -46,8 +46,13 @@ class _IntroductionScreenState extends State<IntroductionScreen> {
     ),
   ];
 
-  void _goToLogin() {
-    context.go(AppRoutes.login);
+  /// Xong onboarding thì vào thẳng trang chủ.
+  ///
+  /// Trước đây đẩy sang màn Login, tức là bắt tạo tài khoản mới được nhìn thấy
+  /// một khách sạn nào. App đặt phòng thì phải cho xem trước đã — lối đăng nhập
+  /// nằm ngay góc trên trang chủ, và các thao tác cần tài khoản sẽ tự mời.
+  void _goToHome() {
+    context.go(AppRoutes.home);
   }
 
   void _next() {
@@ -57,7 +62,7 @@ class _IntroductionScreenState extends State<IntroductionScreen> {
         curve: Curves.easeInOut,
       );
     } else {
-      _goToLogin();
+      _goToHome();
     }
   }
 
@@ -87,7 +92,7 @@ class _IntroductionScreenState extends State<IntroductionScreen> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   TextButton(
-                    onPressed: _goToLogin,
+                    onPressed: _goToHome,
                     child: const Text(
                       'Skip',
                       style: TextStyle(color: AppColors.textSecondary),
