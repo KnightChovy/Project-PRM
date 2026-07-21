@@ -4,8 +4,9 @@ import 'package:smart_stay_ai/core/error/exceptions.dart';
 import 'package:smart_stay_ai/core/network/api_error.dart';
 import 'package:smart_stay_ai/core/network/dio_client.dart';
 import '../models/review_model.dart';
+import '../models/hotel_review_model.dart';
 
-/// Gọi API đánh giá: `POST /reviews` + `GET /reviews/me`.
+/// Gọi API đánh giá: `POST /reviews` + `GET /reviews/me` + `GET /reviews?hotelId=`.
 /// Lỗi thì NÉM Exception (RepositoryImpl bắt và đổi thành Failure).
 abstract interface class ReviewRemoteDataSource {
   Future<ReviewModel> submit({
@@ -20,6 +21,9 @@ abstract interface class ReviewRemoteDataSource {
   });
 
   Future<List<ReviewModel>> getMyReviews();
+
+  /// Đánh giá công khai của một khách sạn.
+  Future<List<HotelReviewModel>> getHotelReviews(String hotelId);
 }
 
 class ReviewRemoteDataSourceImpl implements ReviewRemoteDataSource {
@@ -70,6 +74,25 @@ class ReviewRemoteDataSourceImpl implements ReviewRemoteDataSource {
           .toList();
     } on DioException catch (e) {
       throwApiException(e, fallback: 'Không tải được đánh giá của bạn');
+    }
+  }
+
+  @override
+  Future<List<HotelReviewModel>> getHotelReviews(String hotelId) async {
+    try {
+      final res = await client.dio.get(
+        ApiConstants.reviews,
+        // Lấy nhiều nhất trong 1 trang (max 100) — đủ cho màn Guest Reviews.
+        queryParameters: {'hotelId': hotelId, 'limit': 100},
+      );
+      final data = res.data;
+      final list = data is Map ? (data['results'] as List? ?? const []) : const [];
+      return list
+          .whereType<Map<String, dynamic>>()
+          .map(HotelReviewModel.fromJson)
+          .toList();
+    } on DioException catch (e) {
+      throwApiException(e, fallback: 'Không tải được đánh giá khách sạn');
     }
   }
 }

@@ -33,7 +33,9 @@ import 'package:smart_stay_ai/features/review/data/repositories/review_repositor
 import 'package:smart_stay_ai/features/review/domain/repositories/review_repository.dart';
 import 'package:smart_stay_ai/features/review/domain/usecases/submit_review.dart';
 import 'package:smart_stay_ai/features/review/domain/usecases/get_my_reviews.dart';
+import 'package:smart_stay_ai/features/review/domain/usecases/get_hotel_reviews.dart';
 import 'package:smart_stay_ai/features/review/presentation/providers/review_notifier.dart';
+import 'package:smart_stay_ai/features/review/presentation/providers/hotel_reviews_notifier.dart';
 import 'package:smart_stay_ai/features/assistant/data/datasources/assistant_remote_data_source.dart';
 import 'package:smart_stay_ai/features/assistant/data/repositories/assistant_repository_impl.dart';
 import 'package:smart_stay_ai/features/assistant/domain/repositories/assistant_repository.dart';
@@ -166,7 +168,10 @@ Future<void> initDependencies() async {
   sl.registerLazySingleton<ReviewRepository>(() => ReviewRepositoryImpl(sl()));
   sl.registerLazySingleton(() => SubmitReview(sl()));
   sl.registerLazySingleton(() => GetMyReviews(sl()));
+  sl.registerLazySingleton(() => GetHotelReviews(sl()));
   sl.registerFactory(() => ReviewNotifier(sl(), sl()));
+  // Factory: mỗi khách sạn một phiên xem đánh giá riêng.
+  sl.registerFactory(() => HotelReviewsNotifier(sl()));
 
   // ---- Feature: assistant (AI Assistant) ----
   // DataSource — chatbot Gemini thật ở /v1/conversations.

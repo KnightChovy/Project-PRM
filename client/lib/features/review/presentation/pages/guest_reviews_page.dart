@@ -1,27 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:smart_stay_ai/core/di/injection.dart';
 import 'package:smart_stay_ai/core/theme/app_theme.dart';
 import 'package:smart_stay_ai/features/hotel/domain/entities/hotel.dart';
-
-/// Một đánh giá của khách (hiển thị) — khác `Review` ở domain (vốn dành cho
-/// "đánh giá của chính tôi"): ở đây cần tên + avatar người đánh giá.
-class _GuestReview {
-  final String name;
-  final String avatarUrl;
-  final String date;
-  final int stars;
-  final String comment;
-  final int helpful;
-
-  const _GuestReview({
-    required this.name,
-    required this.avatarUrl,
-    required this.date,
-    required this.stars,
-    required this.comment,
-    required this.helpful,
-  });
-}
+import 'package:smart_stay_ai/features/review/domain/entities/hotel_review.dart';
+import 'package:smart_stay_ai/features/review/presentation/providers/hotel_reviews_notifier.dart';
 
 /// Một tiêu chí điểm (Cleanliness, Location...) + phần trăm.
 class _Category {
@@ -34,10 +17,7 @@ class _Category {
 enum _ReviewFilter { all, recent, positive, critical }
 
 /// Màn "Guest Reviews": điểm tổng, phân tích theo tiêu chí, tóm tắt AI
-/// và danh sách đánh giá của khách.
-///
-/// NOTE: dùng dữ liệu mẫu [_demoReviews]. Khi có backend, lấy theo hotelId
-/// qua UseCase + Notifier.
+/// và danh sách đánh giá thật của khách (GET /reviews?hotelId=).
 class GuestReviewsPage extends StatefulWidget {
   const GuestReviewsPage({super.key, required this.hotel});
 
@@ -48,88 +28,52 @@ class GuestReviewsPage extends StatefulWidget {
 }
 
 class _GuestReviewsPageState extends State<GuestReviewsPage> {
+  // Factory — mỗi khách sạn một phiên riêng nên ta tự dispose.
+  final HotelReviewsNotifier _reviewsN = sl<HotelReviewsNotifier>();
   _ReviewFilter _filter = _ReviewFilter.all;
   int _visible = 3;
 
-  static const _categories = <_Category>[
-    _Category('Cleanliness', 96),
-    _Category('Location', 98),
-    _Category('Service', 94),
-    _Category('Value', 88),
-    _Category('Comfort', 92),
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _reviewsN.addListener(_onReviews);
+    _reviewsN.load(widget.hotel.id);
+  }
 
-  static const _demoReviews = <_GuestReview>[
-    _GuestReview(
-      name: 'James Wilson',
-      avatarUrl: 'https://i.pravatar.cc/150?img=33',
-      date: 'Oct 2025',
-      stars: 5,
-      comment:
-          'An absolute dream. The AI recommendation was spot on — the wellness '
-          'spa is world-class. Breakfast by the bay every morning was unforgettable.',
-      helpful: 12,
-    ),
-    _GuestReview(
-      name: 'Sophie Chen',
-      avatarUrl: 'https://i.pravatar.cc/150?img=45',
-      date: 'Sep 2025',
-      stars: 4,
-      comment:
-          'Stunning views. Service was impeccable, though the check-in took a bit '
-          'longer than expected. Worth every penny for the privacy.',
-      helpful: 8,
-    ),
-    _GuestReview(
-      name: 'Daniel Pham',
-      avatarUrl: 'https://i.pravatar.cc/150?img=15',
-      date: 'Sep 2025',
-      stars: 5,
-      comment:
-          'The infinity pool villa is breathtaking. Staff remembered our names and '
-          'preferences. Will definitely return.',
-      helpful: 6,
-    ),
-    _GuestReview(
-      name: 'Mai Tran',
-      avatarUrl: 'https://i.pravatar.cc/150?img=20',
-      date: 'Aug 2025',
-      stars: 3,
-      comment:
-          'Beautiful resort but the WiFi was unreliable in the villas, which made '
-          'remote work difficult. Everything else was excellent.',
-      helpful: 4,
-    ),
-    _GuestReview(
-      name: 'Lucas Meyer',
-      avatarUrl: 'https://i.pravatar.cc/150?img=52',
-      date: 'Aug 2025',
-      stars: 5,
-      comment:
-          'Privacy and tranquility at its finest. The lakeside spa treatment was '
-          'the highlight of our honeymoon.',
-      helpful: 9,
-    ),
-  ];
+  void _onReviews() {
+    if (mounted) setState(() {});
+  }
 
-  List<_GuestReview> get _filtered {
+  @override
+  void dispose() {
+    _reviewsN.removeListener(_onReviews);
+    _reviewsN.dispose();
+    super.dispose();
+  }
+
+  /// % theo tiêu chí, tính từ chính các đánh giá đã tải.
+  List<_Category> _categories() => [
+        _Category('Cleanliness', _reviewsN.cleanlinessPercent()),
+        _Category('Location', _reviewsN.locationPercent()),
+        _Category('Service', _reviewsN.servicePercent()),
+        _Category('Value', _reviewsN.valuePercent()),
+      ];
+
+  List<HotelReview> get _filtered {
+    final all = _reviewsN.reviews;
     switch (_filter) {
       case _ReviewFilter.positive:
-        return _demoReviews.where((r) => r.stars >= 4).toList();
+        return all.where((r) => r.overall >= 4).toList();
       case _ReviewFilter.critical:
-        return _demoReviews.where((r) => r.stars <= 3).toList();
+        return all.where((r) => r.overall <= 3).toList();
       case _ReviewFilter.recent:
       case _ReviewFilter.all:
-        return _demoReviews;
+        return all;
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final hotel = widget.hotel;
-    final filtered = _filtered;
-    final shown = filtered.take(_visible).toList();
-
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(
@@ -146,28 +90,56 @@ class _GuestReviewsPageState extends State<GuestReviewsPage> {
         ),
         centerTitle: true,
       ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
-        children: [
-          _scoreHeader(hotel),
-          const SizedBox(height: 20),
-          ..._categories.map(_categoryBar),
+      body: _body(),
+    );
+  }
+
+  Widget _body() {
+    if (_reviewsN.isLoading && _reviewsN.reviews.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_reviewsN.status == HotelReviewsStatus.error) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(
+            _reviewsN.errorMessage ?? 'Không tải được đánh giá',
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: AppColors.textSecondary),
+          ),
+        ),
+      );
+    }
+
+    final filtered = _filtered;
+    final shown = filtered.take(_visible).toList();
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
+      children: [
+        _scoreHeader(),
+        const SizedBox(height: 20),
+        if (_reviewsN.reviews.isNotEmpty) ...[
+          ..._categories().map(_categoryBar),
           const SizedBox(height: 20),
           const _AiSummaryCard(),
           const SizedBox(height: 20),
           _filterChips(),
           const SizedBox(height: 16),
-          ...shown.map(_reviewTile),
+          if (shown.isEmpty) _emptyForFilter() else ...shown.map(_reviewTile),
           if (_visible < filtered.length) ...[
             const SizedBox(height: 8),
             _loadMore(),
           ],
-        ],
-      ),
+        ] else
+          _emptyState(),
+      ],
     );
   }
 
-  Widget _scoreHeader(Hotel hotel) {
+  Widget _scoreHeader() {
+    // Điểm hiển thị: trung bình thật từ đánh giá; nếu chưa có thì dùng hạng sao.
+    final avg =
+        _reviewsN.reviews.isEmpty ? widget.hotel.rating : _reviewsN.averageRating;
     return Column(
       children: [
         Row(
@@ -176,7 +148,7 @@ class _GuestReviewsPageState extends State<GuestReviewsPage> {
           textBaseline: TextBaseline.alphabetic,
           children: [
             Text(
-              hotel.rating.toStringAsFixed(1),
+              avg.toStringAsFixed(1),
               style: const TextStyle(
                 fontFamily: 'Georgia',
                 fontSize: 56,
@@ -189,10 +161,34 @@ class _GuestReviewsPageState extends State<GuestReviewsPage> {
           ],
         ),
         Text(
-          'Based on ${_formatCount(hotel.reviewCount)} reviews',
+          'Based on ${_formatCount(_reviewsN.count)} reviews',
           style: const TextStyle(color: AppColors.textSecondary),
         ),
       ],
+    );
+  }
+
+  Widget _emptyState() {
+    return const Padding(
+      padding: EdgeInsets.only(top: 24),
+      child: Center(
+        child: Text(
+          'Chưa có đánh giá nào cho khách sạn này.',
+          style: TextStyle(color: AppColors.textSecondary),
+        ),
+      ),
+    );
+  }
+
+  Widget _emptyForFilter() {
+    return const Padding(
+      padding: EdgeInsets.symmetric(vertical: 24),
+      child: Center(
+        child: Text(
+          'Không có đánh giá khớp bộ lọc này.',
+          style: TextStyle(color: AppColors.textSecondary),
+        ),
+      ),
     );
   }
 
@@ -280,7 +276,7 @@ class _GuestReviewsPageState extends State<GuestReviewsPage> {
     );
   }
 
-  Widget _reviewTile(_GuestReview r) {
+  Widget _reviewTile(HotelReview r) {
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.all(16),
@@ -296,10 +292,17 @@ class _GuestReviewsPageState extends State<GuestReviewsPage> {
         children: [
           Row(
             children: [
+              // API không trả avatar → hiển thị chữ cái đầu của tên.
               CircleAvatar(
                 radius: 20,
                 backgroundColor: AppColors.goldLight,
-                backgroundImage: NetworkImage(r.avatarUrl),
+                child: Text(
+                  _initial(r.authorName),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -307,14 +310,14 @@ class _GuestReviewsPageState extends State<GuestReviewsPage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      r.name,
+                      r.authorName,
                       style: const TextStyle(
                         fontWeight: FontWeight.bold,
                         color: AppColors.textPrimary,
                       ),
                     ),
                     Text(
-                      r.date,
+                      _formatDate(r.createdAt),
                       style: const TextStyle(
                         fontSize: 12,
                         color: AppColors.textSecondary,
@@ -323,36 +326,45 @@ class _GuestReviewsPageState extends State<GuestReviewsPage> {
                   ],
                 ),
               ),
-              _stars(r.stars),
+              _stars(r.overall),
             ],
           ),
+          if (r.title != null && r.title!.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Text(
+              r.title!,
+              style: const TextStyle(
+                fontWeight: FontWeight.w700,
+                color: AppColors.textPrimary,
+              ),
+            ),
+          ],
           const SizedBox(height: 12),
           Text(
-            r.comment,
+            r.content,
             style: const TextStyle(
               fontSize: 14,
               height: 1.5,
               color: AppColors.textPrimary,
             ),
           ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              const Icon(Icons.thumb_up_outlined,
-                  size: 16, color: AppColors.textSecondary),
-              const SizedBox(width: 6),
-              Text(
-                '${r.helpful} found helpful',
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: AppColors.textSecondary,
-                ),
-              ),
-            ],
-          ),
         ],
       ),
     );
+  }
+
+  String _initial(String name) {
+    final trimmed = name.trim();
+    return trimmed.isEmpty ? '?' : trimmed[0].toUpperCase();
+  }
+
+  /// DateTime → "Oct 2025".
+  String _formatDate(DateTime d) {
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    return '${months[d.month - 1]} ${d.year}';
   }
 
   Widget _stars(int count) {

@@ -2,6 +2,7 @@ import 'package:fpdart/fpdart.dart';
 import 'package:smart_stay_ai/core/error/exception_to_failure.dart';
 import 'package:smart_stay_ai/core/error/failures.dart';
 import '../../domain/entities/review.dart';
+import '../../domain/entities/hotel_review.dart';
 import '../../domain/repositories/review_repository.dart';
 import '../datasources/review_remote_data_source.dart';
 
@@ -37,5 +38,10 @@ class ReviewRepositoryImpl implements ReviewRepository {
   @override
   Future<Either<Failure, List<Review>>> getMyReviews() {
     return guardApiCall(() => remote.getMyReviews());
+  }
+
+  @override
+  Future<Either<Failure, List<HotelReview>>> getHotelReviews(String hotelId) {
+    return guardApiCall(() => remote.getHotelReviews(hotelId));
   }
 }

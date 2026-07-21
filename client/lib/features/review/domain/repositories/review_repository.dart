@@ -1,6 +1,7 @@
 import 'package:fpdart/fpdart.dart';
 import 'package:smart_stay_ai/core/error/failures.dart';
 import '../entities/review.dart';
+import '../entities/hotel_review.dart';
 
 /// Hợp đồng cho việc đánh giá. Domain khai báo, Data hiện thực.
 abstract interface class ReviewRepository {
@@ -19,4 +20,7 @@ abstract interface class ReviewRepository {
 
   /// Lấy toàn bộ đánh giá đã gửi (để kiểm tra đã đánh giá chỗ nào, xem lại).
   Future<Either<Failure, List<Review>>> getMyReviews();
+
+  /// Đánh giá công khai của một khách sạn (màn Guest Reviews).
+  Future<Either<Failure, List<HotelReview>>> getHotelReviews(String hotelId);
 }
