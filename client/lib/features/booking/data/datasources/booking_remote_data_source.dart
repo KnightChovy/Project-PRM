@@ -3,7 +3,6 @@ import 'package:smart_stay_ai/core/constants/api_constants.dart';
 import 'package:smart_stay_ai/core/error/exceptions.dart';
 import 'package:smart_stay_ai/core/network/api_error.dart';
 import 'package:smart_stay_ai/core/network/dio_client.dart';
-import '../../domain/entities/checkout.dart';
 import '../../domain/entities/paginated.dart';
 import '../../domain/entities/booking_status.dart';
 import '../models/checkout_model.dart';
@@ -34,7 +33,6 @@ abstract interface class BookingRemoteDataSource {
 
   Future<BookingModel> cancel({
     required String bookingId,
-    required RefundDestination destination,
     String? reason,
   });
 
@@ -116,27 +114,16 @@ class BookingRemoteDataSourceImpl implements BookingRemoteDataSource {
   @override
   Future<BookingModel> cancel({
     required String bookingId,
-    required RefundDestination destination,
     String? reason,
   }) async {
     try {
+      // API huỷ CHỈ nhận `reason`. Tiền hoàn do server tự tính theo chính sách
+      // huỷ và trả về đúng nguồn đã thanh toán (khách không tự chọn nơi nhận).
       final res = await client.dio.patch(
         ApiConstants.cancelBooking(bookingId),
         data: {
           if (reason != null && reason.trim().isNotEmpty)
             'reason': reason.trim(),
-          // `wallet` thì KHÔNG được gửi bankAccount (Joi forbidden -> 400).
-          ...switch (destination) {
-            WalletRefund() => {'refundMethod': 'wallet'},
-            BankRefund(:final account) => {
-                'refundMethod': 'bank',
-                'bankAccount': {
-                  'accountNumber': account.accountNumber,
-                  'bankName': account.bankName,
-                  'accountHolder': account.accountHolder,
-                },
-              },
-          },
         },
       );
       return BookingModel.fromJson(_asMap(res.data));

@@ -33,10 +33,10 @@ abstract interface class BookingRepository {
   /// thanh toán — không tin query param mà cổng thanh toán redirect về.
   Future<Either<Failure, Booking>> getById(String bookingId);
 
-  /// Huỷ booking. [destination] quyết định tiền hoàn đi đâu.
+  /// Huỷ booking. Chỉ gửi [reason]; tiền hoàn do server tự tính theo chính sách
+  /// huỷ và trả về đúng nguồn đã thanh toán.
   Future<Either<Failure, Booking>> cancel({
     required String bookingId,
-    required RefundDestination destination,
     String? reason,
   });
 

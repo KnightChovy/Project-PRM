@@ -97,7 +97,6 @@ class _FakeRepository implements BookingRepository {
   @override
   Future<Either<Failure, Booking>> cancel({
     required String bookingId,
-    required RefundDestination destination,
     String? reason,
   }) async =>
       _result(_booking(status: BookingStatus.cancelled));
@@ -248,10 +247,7 @@ void main() {
     test('huỷ xong thì cập nhật trạng thái booking đang giữ', () async {
       await notifier.create(_params);
 
-      final cancelled = await notifier.cancel(
-        destination: const WalletRefund(),
-        reason: 'Đổi lịch',
-      );
+      final cancelled = await notifier.cancel(reason: 'Đổi lịch');
 
       expect(cancelled?.status, BookingStatus.cancelled);
       expect(notifier.booking?.status, BookingStatus.cancelled);

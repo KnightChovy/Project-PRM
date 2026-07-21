@@ -3,7 +3,6 @@ import 'package:smart_stay_ai/core/di/injection.dart';
 import 'package:smart_stay_ai/core/theme/app_theme.dart';
 import 'package:smart_stay_ai/core/utils/currency_format.dart';
 import 'package:smart_stay_ai/features/booking/domain/entities/booking.dart';
-import 'package:smart_stay_ai/features/booking/domain/entities/checkout.dart';
 import 'package:smart_stay_ai/features/booking/presentation/providers/booking_notifier.dart';
 import 'package:smart_stay_ai/features/booking/presentation/providers/my_bookings_notifier.dart';
 
@@ -26,12 +25,6 @@ class _CancelBookingPageState extends State<CancelBookingPage> {
   String _reason = 'Other';
   final _commentCtrl = TextEditingController();
 
-  // Thông tin tài khoản nhận hoàn tiền — chỉ dùng khi chọn hoàn về ngân hàng.
-  final _accountNumberCtrl = TextEditingController();
-  final _bankNameCtrl = TextEditingController();
-  final _accountHolderCtrl = TextEditingController();
-
-  bool _refundToBank = false;
   bool _submitting = false;
 
   late final BookingNotifier _notifier = sl<BookingNotifier>();
@@ -39,9 +32,6 @@ class _CancelBookingPageState extends State<CancelBookingPage> {
   @override
   void dispose() {
     _commentCtrl.dispose();
-    _accountNumberCtrl.dispose();
-    _bankNameCtrl.dispose();
-    _accountHolderCtrl.dispose();
     _notifier.dispose();
     super.dispose();
   }
@@ -52,37 +42,10 @@ class _CancelBookingPageState extends State<CancelBookingPage> {
     return note.isEmpty ? _reason : '$_reason — $note';
   }
 
-  /// Sealed class buộc phải chọn đúng một nhánh; API cấm gửi `bankAccount`
-  /// khi hoàn về ví nên không thể lỡ tay gửi thừa.
-  RefundDestination? _buildDestination() {
-    if (!_refundToBank) return const WalletRefund();
-
-    final accountNumber = _accountNumberCtrl.text.trim();
-    final bankName = _bankNameCtrl.text.trim();
-    final accountHolder = _accountHolderCtrl.text.trim();
-    if (accountNumber.isEmpty || bankName.isEmpty || accountHolder.isEmpty) {
-      return null;
-    }
-    return BankRefund(
-      BankAccount(
-        accountNumber: accountNumber,
-        bankName: bankName,
-        accountHolder: accountHolder,
-      ),
-    );
-  }
-
   Future<void> _confirm() async {
-    final destination = _buildDestination();
-    if (destination == null) {
-      _toast('Vui lòng nhập đủ thông tin tài khoản nhận hoàn tiền');
-      return;
-    }
-
     setState(() => _submitting = true);
     final cancelled = await _notifier.cancel(
       bookingId: widget.booking.id,
-      destination: destination,
       reason: _fullReason,
     );
     if (!mounted) return;
@@ -101,63 +64,6 @@ class _CancelBookingPageState extends State<CancelBookingPage> {
 
   void _toast(String message) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
-  }
-
-  Widget _refundDestinationPicker() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text('Nhận tiền hoàn vào',
-            style: TextStyle(
-                fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
-        RadioListTile<bool>(
-          value: false,
-          // ignore: deprecated_member_use
-          groupValue: _refundToBank,
-          // ignore: deprecated_member_use
-          onChanged: (v) => setState(() => _refundToBank = v ?? false),
-          contentPadding: EdgeInsets.zero,
-          activeColor: AppColors.goldDark,
-          title: const Text('Ví SmartStay'),
-        ),
-        RadioListTile<bool>(
-          value: true,
-          // ignore: deprecated_member_use
-          groupValue: _refundToBank,
-          // ignore: deprecated_member_use
-          onChanged: (v) => setState(() => _refundToBank = v ?? false),
-          contentPadding: EdgeInsets.zero,
-          activeColor: AppColors.goldDark,
-          title: const Text('Tài khoản ngân hàng'),
-        ),
-        if (_refundToBank) ...[
-          _bankField(_accountNumberCtrl, 'Số tài khoản'),
-          const SizedBox(height: 8),
-          _bankField(_bankNameCtrl, 'Tên ngân hàng'),
-          const SizedBox(height: 8),
-          _bankField(_accountHolderCtrl, 'Chủ tài khoản'),
-        ],
-      ],
-    );
-  }
-
-  Widget _bankField(TextEditingController controller, String hint) {
-    return TextField(
-      controller: controller,
-      decoration: InputDecoration(
-        hintText: hint,
-        filled: true,
-        fillColor: AppColors.surface,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: AppColors.goldLight),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: AppColors.goldLight),
-        ),
-      ),
-    );
   }
 
   @override
@@ -190,8 +96,6 @@ class _CancelBookingPageState extends State<CancelBookingPage> {
             _feeWarning(),
             const SizedBox(height: 16),
             _summary(),
-            const SizedBox(height: 20),
-            _refundDestinationPicker(),
             const SizedBox(height: 20),
             const Text('Lý do huỷ',
                 style: TextStyle(
